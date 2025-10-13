@@ -1,14 +1,20 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/cloudlink-delta/discovery-server/server"
+	"github.com/cloudlink-delta/discovery-server/server/microkey"
 )
 
 func main() {
+	var privB64, pubB64 string
+	privB64, pubB64, _ = microkey.GetKeypair("./priv.key", "./pub.key")
+	fmt.Printf("Your private key is: %s\n", privB64)
+	fmt.Printf("Your public key is: %s\n", pubB64)
 
 	// Define a globally unique designation that will be used to identify this discovery server.
 	// A preferred format follows the following pattern: <COUNTRY>-<CITY>-<STATE/PROVINCE>-(OPTIONAL: NUMBER)
