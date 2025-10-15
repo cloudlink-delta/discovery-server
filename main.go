@@ -17,8 +17,7 @@ func main() {
 	fmt.Printf("Your public key is: %s\n", pubB64)
 
 	// Define a globally unique designation that will be used to identify this discovery server.
-	// A preferred format follows the following pattern: <COUNTRY>-<CITY>-<STATE/PROVINCE>-(OPTIONAL: NUMBER)
-	const DESIGNATION = "US-CIN-NKY-1"
+	const DESIGNATION = "discovery@US-NKY-1"
 
 	s := server.NewServer(DESIGNATION)
 	c := make(chan os.Signal, 1)
