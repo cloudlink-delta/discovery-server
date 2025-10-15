@@ -22,7 +22,10 @@ type Server struct {
 func NewServer(designation string) *Server {
 	config := peer.NewOptions()
 	config.PingInterval = 500
-	config.Debug = 3
+	config.Debug = 2
+	config.Host = "peerjs.mikedev101.cc"
+	config.Port = 443
+	config.Secure = true
 	config.Configuration.ICEServers = []webrtc.ICEServer{
 		{
 			URLs: []string{"stun:vpn.mikedev101.cc:3478", "stun:vpn.mikedev101.cc:5349"},
