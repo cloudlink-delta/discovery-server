@@ -9,7 +9,7 @@ type Client struct {
 	*peer.DataConnection
 }
 
-type Server struct {
+type Instance struct {
 	Name         string
 	Handler      *peer.Peer
 	Close        chan bool

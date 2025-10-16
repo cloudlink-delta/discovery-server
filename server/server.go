@@ -9,7 +9,7 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-func NewServer(designation string) *Server {
+func NewServer(designation string) *Instance {
 	config := peer.NewOptions()
 	config.PingInterval = 500
 	config.Debug = 2
@@ -27,14 +27,14 @@ func NewServer(designation string) *Server {
 		},
 	}
 
-	log.Println("Starting server...")
+	log.Println("Starting peer...")
 	serverPeer, err := peer.NewPeer(designation, config)
 	if err != nil {
 		log.Println(err)
 		return nil
 	}
 
-	serverInstance := &Server{
+	serverInstance := &Instance{
 		Name:         designation,
 		Handler:      serverPeer,
 		Close:        make(chan bool),
@@ -46,7 +46,7 @@ func NewServer(designation string) *Server {
 	return serverInstance
 }
 
-func (s *Server) Run() {
+func (s *Instance) Run() {
 	provider := s.Handler
 	defer provider.Destroy()
 
@@ -83,22 +83,22 @@ func (s *Server) Run() {
 
 	provider.On("open", func(data any) {
 		s.RetryCounter = 0
-		log.Printf("Server opened as %s", s.Name)
+		log.Printf("Peer opened as %s", s.Name)
 	})
 
 	provider.On("close", func(data any) {
-		log.Println("Server closed")
+		log.Println("Peer closed")
 		s.Done <- true
 	})
 
 	<-s.Close
-	log.Println("\nServer got close signal")
+	log.Println("\nPeer got close signal")
 }
 
-func (s *Server) PeerHandler(conn *Client) {
+func (s *Instance) PeerHandler(conn *Client) {
 	conn.On("open", func(data any) {
 		log.Printf("%s connected", conn.GiveName())
-		log.Println(conn.Metadata)
+		log.Printf("%s metadata: %v", conn.GiveName(), conn.Metadata)
 	})
 
 	conn.On("close", func(data any) {
