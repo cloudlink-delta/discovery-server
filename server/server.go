@@ -1,23 +1,13 @@
 package server
 
 import (
-	"encoding/json"
-	"fmt"
+	"log"
+	"math"
+	"time"
 
 	peer "github.com/muka/peerjs-go"
 	"github.com/pion/webrtc/v3"
 )
-
-type Client struct {
-	*peer.DataConnection
-}
-
-type Server struct {
-	Name    string
-	Handler *peer.Peer
-	Close   chan bool
-	Done    chan bool
-}
 
 func NewServer(designation string) *Server {
 	config := peer.NewOptions()
@@ -37,27 +27,30 @@ func NewServer(designation string) *Server {
 		},
 	}
 
+	log.Println("Starting server...")
 	serverPeer, err := peer.NewPeer(designation, config)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return nil
 	}
 
 	serverInstance := &Server{
-		Name:    designation,
-		Handler: serverPeer,
-		Close:   make(chan bool),
-		Done:    make(chan bool),
+		Name:         designation,
+		Handler:      serverPeer,
+		Close:        make(chan bool),
+		Done:         make(chan bool),
+		RetryCounter: 0,
+		MaxRetries:   5,
 	}
 
 	return serverInstance
 }
 
 func (s *Server) Run() {
-	p := s.Handler
-	defer p.Destroy()
+	provider := s.Handler
+	defer provider.Destroy()
 
-	p.On("connection", func(data any) {
+	provider.On("connection", func(data any) {
 		switch c := data.(type) {
 		case *peer.DataConnection:
 			s.PeerHandler(&Client{c})
@@ -66,54 +59,62 @@ func (s *Server) Run() {
 		}
 	})
 
-	p.On("error", func(data any) {
-		fmt.Printf("Server error: %v\n", data)
+	provider.On("error", func(data any) {
+		log.Printf("Server error: %v", data)
+
+		// TODO: Improve error handling
+		if data.(string) == "Lost connection to server" {
+			s.RetryCounter++
+
+			if s.RetryCounter > s.MaxRetries {
+				log.Println("Max retries reached")
+				s.Done <- true
+				return
+			}
+
+			if s.RetryCounter > 0 {
+				time.Sleep(time.Duration(math.Pow(2, float64(s.RetryCounter))) * time.Second)
+			}
+
+			log.Printf("Attempting to reconnect... (%d of %d attempts)", s.RetryCounter, s.MaxRetries)
+			provider.Reconnect()
+		}
 	})
 
-	p.On("open", func(data any) {
-		fmt.Printf("Server opened as %s\n", s.Name)
+	provider.On("open", func(data any) {
+		s.RetryCounter = 0
+		log.Printf("Server opened as %s", s.Name)
 	})
 
-	p.On("close", func(data any) {
-		fmt.Println("Server closed")
+	provider.On("close", func(data any) {
+		log.Println("Server closed")
 		s.Done <- true
 	})
 
 	<-s.Close
-	fmt.Println("\nServer got close signal")
+	log.Println("\nServer got close signal")
 }
 
 func (s *Server) PeerHandler(conn *Client) {
 	conn.On("open", func(data any) {
-		fmt.Printf("Peer %s connected\n", conn.GetPeerID())
+		log.Printf("%s connected", conn.GiveName())
+		log.Println(conn.Metadata)
 	})
 
 	conn.On("close", func(data any) {
-		fmt.Printf("Peer %s disconnected\n", conn.GetPeerID())
+		log.Printf("%s disconnected", conn.GiveName())
 	})
 
 	conn.On("error", func(data any) {
-		fmt.Printf("Peer %s error: %v\n", conn.GetPeerID(), data)
+		log.Printf("%s error: %v", conn.GiveName(), data)
 	})
 
 	conn.On("data", func(data any) {
-		byteStream := data.([]byte)
-
-		// Trim (UTF-16) header???
-		byteStream = byteStream[3:]
-
-		fmt.Printf("Received data from peer %s: %s\n", conn.GetPeerID(), byteStream)
-
-		packet := struct {
-			Opcode  string `json:"opcode"`
-			Payload any    `json:"payload"`
-		}{}
-		err := json.Unmarshal(fmt.Appendf(nil, "%s", byteStream), &packet)
-		if err != nil {
-			fmt.Println(err)
+		packet := conn.Read(data)
+		if packet == nil {
 			return
 		}
-
-		// TODO...
+		log.Printf("%s 🢂 %v", conn.GiveName(), packet)
+		go conn.HandlePacket(packet)
 	})
 }
