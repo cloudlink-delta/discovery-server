@@ -2,11 +2,9 @@ module github.com/cloudlink-delta/discovery-server
 
 go 1.25.2
 
-require (
-	github.com/goccy/go-json v0.10.5
-	github.com/muka/peerjs-go v0.0.0-20240401061429-5b28944b9e4f
-	github.com/pion/webrtc/v3 v3.1.47
-)
+replace github.com/cloudlink-delta/duplex => ../duplex
+
+require github.com/cloudlink-delta/duplex v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/chuckpreslar/emission v0.0.0-20170206194824-a7ddd980baf9 // indirect
