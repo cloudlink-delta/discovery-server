@@ -94,7 +94,19 @@ func New(ID string) *Instance {
 	server.IsDiscovery = true
 
 	server.OnOpen = func(peer *duplex.Peer) {
-		// TODO: emit current list of public lobbies?
+
+		// Obtain lock
+		server.Mutex.Lock()
+		defer server.Mutex.Unlock()
+
+		// Return current lobby list
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "LOBBY_LIST",
+				TTL:    1,
+			},
+			Payload: server.Lobbies.ToSlice(),
+		})
 	}
 
 	server.OnClose = func(peer *duplex.Peer) {
@@ -196,10 +208,11 @@ func New(ID string) *Instance {
 	/*
 	 * CONFIG_HOST is a request to create a new lobby.
 	 * {
-	 *   "lobby_id": string,
+	 *   "lobby_id": any,
 	 *   "password": string,
 	 *   "max_peers": int,
 	 *   "locked": bool,
+	 *   "hidden": bool,
 	 *   "metadata": any
 	 * }
 	 */
@@ -316,7 +329,7 @@ func New(ID string) *Instance {
 
 	/* CONFIG_PEER is a request to join a lobby.
 	 * {
-	 *   "lobby_id": string,
+	 *   "lobby_id": any,
 	 *   "password": string
 	 * }
 	 */
@@ -324,7 +337,7 @@ func New(ID string) *Instance {
 
 		// Define arguments for the CONFIG_PEER opcode
 		type ConfigPeerArgs struct {
-			LobbyID  string `json:"lobby_id"`
+			LobbyID  any    `json:"lobby_id"`
 			Password string `json:"password"`
 		}
 
@@ -438,7 +451,7 @@ func New(ID string) *Instance {
 			Payload: args.LobbyID,
 		})
 
-		// Notify other peers
+		// Notify members
 		for _, p := range server.Members[lobby] {
 			if p != peer {
 				go p.Write(&duplex.TxPacket{
@@ -450,6 +463,16 @@ func New(ID string) *Instance {
 				})
 			}
 		}
+
+		// Notify host
+		host := server.Hosts[lobby]
+		go host.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "PEER_JOIN",
+				TTL:    1,
+			},
+			Payload: peer.GetPeerID(),
+		})
 	})
 
 	// LOBBY_LIST is a request for a list of lobbies.
