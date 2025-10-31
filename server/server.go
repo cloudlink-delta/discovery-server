@@ -214,6 +214,7 @@ func New(designation string) *Instance {
 
 				// Destroy the lobby if there are no more members
 				delete(server.Lobbies, AnyToString(lobby.ID))
+				delete(server.Hosts, lobby)
 				delete(server.Members, lobby)
 
 				// Tell all peers the lobby has been destroyed
@@ -393,7 +394,7 @@ func New(designation string) *Instance {
 		server.Hosts[lobby] = peer
 
 		// Set key
-		peer.KeyStore["lobby"] = lobby
+		peer.KeyStore["lobby"] = args.LobbyID
 
 		// Log
 		log.Printf("%s created %v", peer.GiveName(), args.LobbyID)
@@ -542,7 +543,7 @@ func New(designation string) *Instance {
 		server.Members[lobby] = append(server.Members[lobby], peer)
 
 		// Set key
-		peer.KeyStore["lobby"] = lobby
+		peer.KeyStore["lobby"] = args.LobbyID
 
 		// Log
 		log.Printf("%s joined %v", peer.GiveName(), lobby)
@@ -1046,6 +1047,8 @@ func New(designation string) *Instance {
 
 		// Register peer
 		server.NameRegistry[username] = peer
+
+		// Obtain lock and set name
 		peer.KeyStore["name"] = username
 
 		// Return success
@@ -1130,7 +1133,20 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (*Lobby, bool, bool) {
 
 	// Get current lobby
-	lobby, ok := p.KeyStore["lobby"].(*Lobby)
+	lobby_id, ok := p.KeyStore["lobby"]
+	if !ok {
+		if emit_warn {
+			p.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "CONFIG_REQUIRED",
+					TTL:    1,
+				},
+			})
+		}
+		return nil, false, halt_if_fail
+	}
+
+	lobby := i.Lobbies[AnyToString(lobby_id)]
 	if lobby == nil {
 		if emit_warn {
 			p.Write(&duplex.TxPacket{
@@ -1141,8 +1157,6 @@ func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (
 			})
 		}
 		return nil, false, halt_if_fail
-	} else if !ok {
-		panic("lobby: unexpected type assertion failure")
 	}
 
 	// Obtain lock
