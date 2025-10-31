@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-json"
+	"github.com/google/uuid"
 
 	"github.com/cloudlink-delta/duplex"
 )
@@ -23,6 +25,18 @@ type Lobby struct {
 	Password     string     `json:"-"`             // Password for the lobby
 	Instance     *Instance  `json:"-"`             // Pointer to the instance
 	*sync.Mutex  `json:"-"` // Mutex for thread safety
+}
+
+type QueryAck struct {
+	Online        bool   `json:"online"`
+	Username      string `json:"username,omitempty"`
+	Designation   string `json:"designation,omitempty"`
+	InstanceID    string `json:"instance_id,omitempty"`
+	IsLobbyMember bool   `json:"is_lobby_member,omitempty"`
+	IsLobbyHost   bool   `json:"is_lobby_host,omitempty"`
+	IsInLobby     bool   `json:"is_in_lobby,omitempty"`
+	LobbyID       string `json:"lobby_id,omitempty"`
+	RTT           int64  `json:"rtt,omitempty"`
 }
 
 // Define type aliases
@@ -84,27 +98,33 @@ func (l *Lobby) ComputeCount() {
 
 // Define Discovery server
 type Instance struct {
-	Lobbies Lobbies
-	Hosts   Hosts
-	Members Peers
-	Mutex   *sync.Mutex
+	Designation  string
+	Lobbies      Lobbies
+	Hosts        Hosts
+	Members      Peers
+	Mutex        *sync.Mutex
+	NameRegistry map[string]*duplex.Peer
 	*duplex.Instance
 }
 
-func New(ID string) *Instance {
+func New(designation string) *Instance {
 
 	// Initialize duplex instance
 	server := &Instance{
-		Instance: duplex.New(ID),
-		Lobbies:  make(Lobbies),
-		Hosts:    make(Hosts),
-		Members:  make(Peers),
-		Mutex:    &sync.Mutex{},
+		Designation:  designation,
+		Instance:     duplex.New("discovery@" + designation),
+		Lobbies:      make(Lobbies),
+		Hosts:        make(Hosts),
+		Members:      make(Peers),
+		Mutex:        &sync.Mutex{},
+		NameRegistry: make(map[string]*duplex.Peer),
 	}
 	server.IsDiscovery = true
 
+	// server.OnOpen gets called immediately when a peer connects.
 	server.OnOpen = func(_ *duplex.Peer) {}
 
+	// server.AfterNegotiation gets called after both our peer and the peer we just connected negotiates successfully.
 	server.AfterNegotiation = func(peer *duplex.Peer) {
 
 		// Obtain lock
@@ -123,7 +143,17 @@ func New(ID string) *Instance {
 		// TODO: spawn a thread that periodically PING/PONGs the newly connected peer to calculate RTT
 	}
 
+	// server.OnClose gets called when a peer disconnects.
 	server.OnClose = func(peer *duplex.Peer) {
+
+		// Read name
+		name, name_set := peer.KeyStore["name"]
+		if name_set {
+			if _n, ok := name.(string); ok {
+				delete(server.NameRegistry, _n)
+			}
+		}
+
 		// Read state
 		lobby, host, _ := server.GetState(peer, false, false)
 
@@ -148,7 +178,35 @@ func New(ID string) *Instance {
 				server.Hosts[lobby] = new_host
 				lobby.Remove(new_host)
 
-				// TODO: tell peers they are now the host
+				// tell peers they are now the host, also tell them the old host is leaving
+				for _, p := range server.Members[lobby] {
+					if p == peer {
+						continue
+					}
+					go p.Write(&duplex.TxPacket{
+						Packet: duplex.Packet{
+							Opcode: "PEER_LEFT",
+							TTL:    1,
+						},
+						Payload: peer.GetPeerID(),
+					})
+					go p.Write(&duplex.TxPacket{
+						Packet: duplex.Packet{
+							Opcode: "NEW_HOST",
+							TTL:    1,
+						},
+						Payload: new_host.GetPeerID(),
+					})
+				}
+
+				// Transition to host mode
+				new_host.Write(&duplex.TxPacket{
+					Packet: duplex.Packet{
+						Opcode: "TRANSITION",
+						TTL:    1,
+					},
+					Payload: "host",
+				})
 
 				log.Printf("made %s the new host of lobby %v", new_host.GetPeerID(), lobby.ID)
 
@@ -158,7 +216,19 @@ func New(ID string) *Instance {
 				delete(server.Lobbies, AnyToString(lobby.ID))
 				delete(server.Members, lobby)
 
-				// TODO: tell peers the lobby has been destroyed
+				// Tell all peers the lobby has been destroyed
+				for _, p := range server.Peers {
+					if p == peer {
+						continue
+					}
+					go p.Write(&duplex.TxPacket{
+						Packet: duplex.Packet{
+							Opcode: "LOBBY_CLOSED",
+							TTL:    1,
+						},
+						Payload: AnyToString(lobby.ID),
+					})
+				}
 
 				log.Printf("destroyed lobby %v since it was empty", lobby.ID)
 			}
@@ -219,7 +289,7 @@ func New(ID string) *Instance {
 			},
 			Payload: lobby,
 		})
-	})
+	}, "discovery")
 
 	/*
 	 * CONFIG_HOST is a request to create a new lobby.
@@ -247,6 +317,14 @@ func New(ID string) *Instance {
 		// Read arguments
 		var args ConfigHostArgs
 		if err := json.Unmarshal(packet.Payload, &args); err != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: err.Error(),
+			})
+			peer.Close()
 			return
 		}
 
@@ -351,7 +429,7 @@ func New(ID string) *Instance {
 			},
 			Payload: lobby,
 		}, server.Peers.ToSlice(peer))
-	})
+	}, "discovery")
 
 	/* CONFIG_PEER is a request to join a lobby.
 	 * {
@@ -377,6 +455,7 @@ func New(ID string) *Instance {
 				},
 				Payload: err.Error(),
 			})
+			peer.Close()
 			return
 		}
 
@@ -508,7 +587,7 @@ func New(ID string) *Instance {
 			},
 			Payload: peer.GetPeerID(),
 		})
-	})
+	}, "discovery")
 
 	// LOBBY_LIST is a request for a list of lobbies.
 	server.Bind("LOBBY_LIST", func(peer *duplex.Peer, _ *duplex.RxPacket) {
@@ -525,7 +604,7 @@ func New(ID string) *Instance {
 			},
 			Payload: server.Lobbies.ToSlice(),
 		})
-	})
+	}, "discovery")
 
 	// LOCK is an administrative command that can lock access to a lobby.
 	server.Bind("LOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -554,7 +633,7 @@ func New(ID string) *Instance {
 				TTL:    1,
 			},
 		})
-	})
+	}, "discovery")
 
 	// UNLOCK is an administrative command that can unlock access to a lobby.
 	server.Bind("UNLOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -583,7 +662,7 @@ func New(ID string) *Instance {
 				TTL:    1,
 			},
 		})
-	})
+	}, "discovery")
 
 	// SIZE is an adminstrative command that can change the max player count of a lobby.
 	server.Bind("SIZE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -617,11 +696,12 @@ func New(ID string) *Instance {
 		if err := json.Unmarshal(packet.Payload, &new_count); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
+					Opcode: "VIOLATION",
 					TTL:    1,
 				},
 				Payload: err.Error(),
 			})
+			peer.Close()
 			return
 		}
 
@@ -647,12 +727,12 @@ func New(ID string) *Instance {
 				TTL:    1,
 			},
 		})
-	})
+	}, "discovery")
 
 	// KICK is an administrative command that can remove a peer from a lobby.
 	server.Bind("KICK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// TODO: implement
-	})
+	}, "discovery")
 
 	// HIDE is an administrative command that can prevent a lobby from being shown in the lobby list or broadcasts.
 	server.Bind("HIDE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -680,7 +760,7 @@ func New(ID string) *Instance {
 				TTL:    1,
 			},
 		})
-	})
+	}, "discovery")
 
 	// SHOW is an administrative command that can allow a lobby from being shown in the lobby list list or broadcasts.
 	server.Bind("SHOW", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -709,17 +789,91 @@ func New(ID string) *Instance {
 				TTL:    1,
 			},
 		})
-	})
+	}, "discovery")
 
 	// TRANSFER is an administrative command that can transfer a lobby to another peer.
 	server.Bind("TRANSFER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// TODO: implement
-	})
+	}, "discovery")
 
 	// QUERY returns details about a connected peer, including the lobby they are in, their RTT to the server, and roles.
 	server.Bind("QUERY", func(peer *duplex.Peer, packet *duplex.RxPacket) {
-		// TODO: implement
-	})
+
+		// Read the payload as a query argument
+		var query string
+		if err := json.Unmarshal(packet.Payload, &query); err != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: err.Error(),
+			})
+			peer.Close()
+			return
+		}
+
+		// detect if this is a plain username or a username with a suffix
+		parts := strings.Split(query, "@")
+		log.Println("QUERY:", query)
+		log.Println("Parts:", parts)
+
+		if len(parts) == 1 {
+			server.ResolvePeer(parts[0], peer, packet)
+
+		} else {
+
+			// username with specific designation (i.e. "bob@US-NKY-1")
+			// Check if the designation is our own, if so, use our local resolver
+			if parts[1] == server.Designation {
+				server.ResolvePeer(parts[0], peer, packet)
+
+			} else {
+
+				// Try to find target discovery server
+				target, ok := server.Peers["discovery@"+parts[1]]
+				if !ok {
+
+					// There is no one to be resolved
+					peer.Write(&duplex.TxPacket{
+						Packet: duplex.Packet{
+							Opcode: "QUERY_ACK",
+							TTL:    1,
+						},
+						Payload: QueryAck{
+							Username: parts[0],
+							Online:   false,
+						},
+					})
+					return
+				}
+
+				// Generate a unique listener UUID
+				listener_id, _ := uuid.NewRandom()
+
+				// Send request to the designation's discovery server
+				reply := target.SendAndWaitForReply("QUERY_ACK", &duplex.TxPacket{
+					Packet: duplex.Packet{
+						Opcode:   "QUERY",
+						TTL:      1,
+						Listener: listener_id.String(),
+					},
+					Payload: packet.Payload,
+				})
+
+				// Forward the response back to the client
+				resp := &duplex.TxPacket{
+					Packet: duplex.Packet{
+						Opcode:   "QUERY_ACK",
+						TTL:      1,
+						Listener: packet.Listener,
+					},
+					Payload: reply.Payload,
+				}
+				peer.Write(resp)
+			}
+		}
+	}, "discovery")
 
 	// LEAVE is a non-administrative command that can leave a lobby.
 	server.Bind("LEAVE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -772,6 +926,15 @@ func New(ID string) *Instance {
 
 		log.Printf("%s left %s", peer.GiveName(), lobby.ID)
 
+		// Transition to ""
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "TRANSITION",
+				TTL:    1,
+			},
+			Payload: "",
+		})
+
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
@@ -780,7 +943,7 @@ func New(ID string) *Instance {
 			},
 			Payload: lobby.ID,
 		})
-	})
+	}, "discovery")
 
 	// CLOSE is an administrative command that can close a lobby.
 	server.Bind("CLOSE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -805,7 +968,7 @@ func New(ID string) *Instance {
 		defer lobby.Unlock()
 
 		// Notify all peers that the lobby has been closed
-		for _, p := range lobby.Instance.Members[lobby] {
+		for _, p := range server.Members[lobby] {
 			p.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode: "LOBBY_CLOSED",
@@ -813,13 +976,19 @@ func New(ID string) *Instance {
 				},
 				Payload: lobby.ID,
 			})
+			p.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "TRANSITION",
+					TTL:    1,
+				},
+				Payload: "",
+			})
 		}
 
 		// Destroy the lobby
-		lobby.Instance.Lobbies[AnyToString(lobby.ID)] = nil
-		delete(lobby.Instance.Lobbies, AnyToString(lobby.ID))
-		delete(lobby.Instance.Members, lobby)
-		delete(lobby.Instance.Hosts, lobby)
+		delete(server.Lobbies, AnyToString(lobby.ID))
+		delete(server.Members, lobby)
+		delete(server.Hosts, lobby)
 		log.Printf("%s closed %s", peer.GiveName(), lobby.ID)
 
 		// Tell the host to TRANSITION to ""
@@ -839,25 +1008,45 @@ func New(ID string) *Instance {
 			},
 			Payload: lobby.ID,
 		})
-	})
+	}, "discovery")
 
+	// REGISTER programs a peer's preferred name, since discovery services require unique connection identifiers.
 	server.Bind("REGISTER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 
-		// Read desired name
-		var name any
-		if err := json.Unmarshal([]byte(packet.Payload), &name); err != nil {
+		// Read desired username
+		var username string
+		if err := json.Unmarshal([]byte(packet.Payload), &username); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
+					Opcode: "VIOLATION",
 					TTL:    1,
 				},
-				Payload: "name: " + err.Error(),
+				Payload: err.Error(),
 			})
+			peer.Close()
+			return
+		}
+
+		// Obtain lock
+		server.Mutex.Lock()
+		defer server.Mutex.Unlock()
+
+		// Check if the registry has a match
+		if server.NameRegistry[username] != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: fmt.Sprintf("Username %s is already in use", username),
+			})
+			peer.Close()
 			return
 		}
 
 		// Register peer
-		peer.KeyStore["name"] = name
+		server.NameRegistry[username] = peer
+		peer.KeyStore["name"] = username
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -865,11 +1054,73 @@ func New(ID string) *Instance {
 				Opcode: "REGISTER_ACK",
 				TTL:    1,
 			},
-			Payload: name,
+			Payload: username,
 		})
-	})
+	}, "discovery")
 
 	return server
+}
+
+// ResolvePeer is a function that resolves a peer based on a query string.
+//
+// @param query - The query string to search for.
+// @param peer - The peer object that sent the query.
+// @param packet - The Rx packet object that contains the query string.
+//
+// ResolvePeer will reply with a QUERY_ACK packet containing the resolved peer's information.
+// If the query string does not match any peer in the instance's name registry, ResolvePeer will reply with a QUERY_ACK packet containing an empty name and false online status.
+// If the query string matches a peer in the instance's name registry, ResolvePeer will reply with a QUERY_ACK packet containing the resolved peer's information.
+func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duplex.RxPacket) {
+
+	// Obtain lock
+	i.Mutex.Lock()
+	defer i.Mutex.Unlock()
+
+	target, exists := i.NameRegistry[username]
+
+	// not found
+	if !exists {
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode:   "QUERY_ACK",
+				TTL:      1,
+				Listener: packet.Listener,
+			},
+			Payload: QueryAck{
+				Username: username,
+				Online:   false,
+			},
+		})
+		return
+	}
+
+	// found
+	var isInLobby bool
+	lobby, isHost, _ := i.GetState(target, false, false)
+	isInLobby = lobby != nil
+
+	response := &QueryAck{
+		Online:        true,
+		Username:      username,
+		Designation:   i.Designation,
+		InstanceID:    target.GetPeerID(),
+		IsLobbyMember: isInLobby && !isHost,
+		IsLobbyHost:   isInLobby && isHost,
+		IsInLobby:     isInLobby,
+	}
+
+	if isInLobby {
+		response.LobbyID = AnyToString(lobby.ID)
+	}
+
+	peer.Write(&duplex.TxPacket{
+		Packet: duplex.Packet{
+			Opcode:   "QUERY_ACK",
+			TTL:      1,
+			Listener: packet.Listener,
+		},
+		Payload: response,
+	})
 }
 
 // GetState returns the current lobby and whether the peer is the host or not.
