@@ -107,12 +107,12 @@ type Instance struct {
 	*duplex.Instance
 }
 
-func New(designation string) *Instance {
+func New(designation string, hostname ...string) *Instance {
 
 	// Initialize duplex instance
 	server := &Instance{
 		Designation:  designation,
-		Instance:     duplex.New("discovery@" + designation),
+		Instance:     duplex.New("discovery@"+designation, hostname...),
 		Lobbies:      make(Lobbies),
 		Hosts:        make(Hosts),
 		Members:      make(Peers),
