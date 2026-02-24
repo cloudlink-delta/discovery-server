@@ -15,16 +15,17 @@ import (
 
 // Define a struct to hold lobby data
 type Lobby struct {
-	ID           any        `json:"lobby_id"`      // ID of the lobby
-	Host         string     `json:"host"`          // Host of the lobby
-	CurrentPeers int64      `json:"current_peers"` // Number of peers currently in the lobby
-	MaxPeers     int64      `json:"max_peers"`     // Maximum number of peers allowed in the lobby
-	Hidden       bool       `json:"hidden"`        // Whether the lobby is hidden
-	Locked       bool       `json:"locked"`        // Whether the lobby is locked
-	Metadata     any        `json:"metadata"`      // Arbitrary, user-defined storage
-	Password     string     `json:"-"`             // Password for the lobby
-	Instance     *Instance  `json:"-"`             // Pointer to the instance
-	*sync.Mutex  `json:"-"` // Mutex for thread safety
+	ID               any        `json:"lobby_id"`      // ID of the lobby
+	Host             string     `json:"host"`          // Host of the lobby
+	CurrentPeers     int64      `json:"current_peers"` // Number of peers currently in the lobby
+	MaxPeers         int64      `json:"max_peers"`     // Maximum number of peers allowed in the lobby
+	PasswordRequired bool       `json:"password_required"`
+	Hidden           bool       `json:"hidden"`   // Whether the lobby is hidden
+	Locked           bool       `json:"locked"`   // Whether the lobby is locked
+	Metadata         any        `json:"metadata"` // Arbitrary, user-defined storage
+	Password         string     `json:"-"`        // Password for the lobby
+	Instance         *Instance  `json:"-"`        // Pointer to the instance
+	*sync.Mutex      `json:"-"` // Mutex for thread safety
 }
 
 type QueryAck struct {
@@ -379,14 +380,15 @@ func New(designation string, hostname ...string) *Instance {
 
 		// Create lobby
 		lobby := &Lobby{
-			ID:       args.LobbyID,
-			MaxPeers: *args.MaxPeers,
-			Locked:   args.Locked,
-			Hidden:   args.Hidden,
-			Password: args.Password,
-			Metadata: args.Metadata,
-			Mutex:    &sync.Mutex{},
-			Instance: server,
+			ID:               args.LobbyID,
+			MaxPeers:         *args.MaxPeers,
+			Locked:           args.Locked,
+			Hidden:           args.Hidden,
+			Password:         args.Password,
+			PasswordRequired: args.Password != "",
+			Metadata:         args.Metadata,
+			Mutex:            &sync.Mutex{},
+			Instance:         server,
 		}
 
 		// Add lobby to server
@@ -438,7 +440,7 @@ func New(designation string, hostname ...string) *Instance {
 				Opcode: "NEW_LOBBY",
 				TTL:    1,
 			},
-			Payload: lobby,
+			Payload: lobby.ID,
 		}, server.Peers.ToSlice(peer))
 	}, "discovery")
 
@@ -1461,6 +1463,9 @@ func ValidateAnyType(name any) error {
 }
 
 func AnyToString(val any) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
 	res, _ := json.Marshal(val)
 	return string(res)
 }
