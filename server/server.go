@@ -422,6 +422,16 @@ func New(designation string, hostname ...string) *Instance {
 			return
 		}
 
+		// If locked, do not broadcast
+		if args.Locked {
+			return
+		}
+
+		// If password is set, do not broadcast
+		if args.Password != "" {
+			return
+		}
+
 		// Tell all peers about the new lobby (except the host)
 		server.Broadcast(&duplex.TxPacket{
 			Packet: duplex.Packet{
