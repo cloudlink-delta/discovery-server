@@ -7,12 +7,12 @@ replace github.com/cloudlink-delta/duplex => ../duplex
 require (
 	github.com/cloudlink-delta/duplex v0.0.0-00010101000000-000000000000
 	github.com/goccy/go-json v0.10.5
+	github.com/google/uuid v1.3.1
 )
 
 require (
 	github.com/chuckpreslar/emission v0.0.0-20170206194824-a7ddd980baf9 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/google/uuid v1.3.1 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/muka/peerjs-go v0.0.0-20240401061429-5b28944b9e4f // indirect
 	github.com/pion/datachannel v1.5.8 // indirect

@@ -730,9 +730,164 @@ func New(designation string, hostname ...string) *Instance {
 		})
 	}, "discovery")
 
+	// PASSWORD is an adminstrative command that can change the password of a lobby.
+	server.Bind("PASSWORD", func(peer *duplex.Peer, packet *duplex.RxPacket) {
+		// Get current lobby
+		lobby, admin, halt := server.GetState(peer, true, true)
+		if halt {
+			return
+		}
+		if !admin {
+			return
+		}
+
+		// Obtain lock
+		lobby.Lock()
+		defer lobby.Unlock()
+
+		// Validate input
+		if packet.Payload == nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "WARNING",
+					TTL:    1,
+				},
+				Payload: "payload: must be a string",
+			})
+			return
+		}
+
+		// Read new value
+		var new_password string
+		if err := json.Unmarshal(packet.Payload, &new_password); err != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: err.Error(),
+			})
+			peer.Close()
+			return
+		}
+
+		// Set new value
+		lobby.Password = new_password
+		log.Printf("%s updated lobby %s password", peer.GiveName(), lobby.ID)
+
+		// Return success
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "PASSWORD_ACK",
+				TTL:    1,
+			},
+		})
+	}, "discovery")
+
 	// KICK is an administrative command that can remove a peer from a lobby.
 	server.Bind("KICK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
-		// TODO: implement
+		// Get current lobby
+		lobby, admin, halt := server.GetState(peer, true, true)
+		if halt {
+			return
+		}
+		if !admin {
+			return
+		}
+
+		// Obtain lock
+		lobby.Lock()
+		defer lobby.Unlock()
+
+		// Validate input
+		if packet.Payload == nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "WARNING",
+					TTL:    1,
+				},
+				Payload: "payload: must be a string",
+			})
+			return
+		}
+
+		// Read new value
+		var query string
+		if err := json.Unmarshal(packet.Payload, &query); err != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: err.Error(),
+			})
+			peer.Close()
+			return
+		}
+
+		// Find peer based on name
+		target, ok := server.NameRegistry[query]
+		if !ok {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "KICK_ACK",
+					TTL:    1,
+				},
+				Payload: false,
+			})
+			return
+		}
+
+		// Obtain lock
+		lobby.Lock()
+		defer lobby.Unlock()
+
+		// Leave lobby
+		lobby.Remove(target)
+
+		// Notify members
+		for _, p := range server.Members[lobby] {
+			if p == peer || p == target {
+				continue
+			}
+			go p.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "PEER_LEFT",
+					TTL:    1,
+				},
+				Payload: target.GetPeerID(),
+			})
+		}
+
+		// Notify host
+		host := server.Hosts[lobby]
+		go host.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "PEER_LEFT",
+				TTL:    1,
+			},
+			Payload: target.GetPeerID(),
+		})
+
+		// Tell target they were kicked
+		target.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "KICKED",
+				TTL:    1,
+			},
+		})
+
+		log.Printf("%s was kicked from lobby %s by %s", target.GiveName(), lobby.ID, peer.GiveName())
+
+		// Return success
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "KICK_ACK",
+				TTL:    1,
+			},
+			Payload: true,
+		})
+
 	}, "discovery")
 
 	// HIDE is an administrative command that can prevent a lobby from being shown in the lobby list or broadcasts.
@@ -794,7 +949,115 @@ func New(designation string, hostname ...string) *Instance {
 
 	// TRANSFER is an administrative command that can transfer a lobby to another peer.
 	server.Bind("TRANSFER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
-		// TODO: implement
+		// Get current lobby
+		lobby, admin, halt := server.GetState(peer, true, true)
+		if halt {
+			return
+		}
+		if !admin {
+			return
+		}
+
+		// Validate input
+		if packet.Payload == nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "WARNING",
+					TTL:    1,
+				},
+				Payload: "payload: must be a string",
+			})
+			return
+		}
+
+		// Read new value
+		var query string
+		if err := json.Unmarshal(packet.Payload, &query); err != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: err.Error(),
+			})
+			peer.Close()
+			return
+		}
+
+		// Find peer based on name
+		target, ok := server.NameRegistry[query]
+		if !ok {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "TRANSFER_ACK",
+					TTL:    1,
+				},
+				Payload: false,
+			})
+			return
+		}
+
+		// Obtain lock
+		server.Mutex.Lock()
+		defer server.Mutex.Unlock()
+
+		lobby.Lock()
+		defer lobby.Unlock()
+
+		// Unset current host
+		delete(server.Hosts, lobby)
+
+		// Set new host
+		server.Hosts[lobby] = target
+		lobby.Remove(target)
+
+		// Transition target to host mode
+		target.Write(
+			&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "TRANSITION",
+					TTL:    1,
+				},
+				Payload: "host",
+			},
+		)
+
+		// Transition current host to peer mode
+		target.Write(
+			&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "TRANSITION",
+					TTL:    1,
+				},
+				Payload: "peer",
+			},
+		)
+
+		// Notify peers of new host
+		for _, p := range server.Members[lobby] {
+			if p == peer {
+				continue
+			}
+			go p.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "NEW_HOST",
+					TTL:    1,
+				},
+				Payload: target.GetPeerID(),
+			})
+		}
+
+		log.Printf("%s transferred %s to %s", peer.GiveName(), lobby.ID, target.GetPeerID())
+
+		// Return success
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "TRANSFER_ACK",
+				TTL:    1,
+			},
+			Payload: true,
+		})
+
 	}, "discovery")
 
 	// QUERY returns details about a connected peer, including the lobby they are in, their RTT to the server, and roles.
