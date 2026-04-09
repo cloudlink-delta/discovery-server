@@ -1163,7 +1163,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				listener_id, _ := uuid.NewRandom()
 
 				// Send request to the designation's discovery server
-				reply := target.SendAndWaitForReply("QUERY_ACK", &duplex.TxPacket{
+				reply := target.SendAndWaitForReply(&duplex.TxPacket{
 					Packet: duplex.Packet{
 						Opcode:   "QUERY",
 						TTL:      1,
