@@ -15,7 +15,7 @@ func main() {
 	const DESIGNATION = "SOMEWHERE-EARTH"
 
 	// Initialize the discovery server
-	instance := discovery.New(DESIGNATION)
+	instance := discovery.New(DESIGNATION, nil)
 
 	// Graceful shutdown handler
 	c := make(chan os.Signal, 1)
