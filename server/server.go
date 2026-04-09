@@ -156,7 +156,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		}
 
 		// Read state
-		lobby, host, _ := server.GetState(peer, false, false)
+		lobby, host, _ := server.GetState(peer, false, false, &duplex.RxPacket{})
 
 		// Do nothing if they are not in a lobby
 		if lobby == nil {
@@ -255,8 +255,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &target); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -268,8 +269,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if !exists {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "LOBBY_NOTFOUND",
-					TTL:    1,
+					Opcode:   "LOBBY_NOTFOUND",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: fmt.Sprintf("Lobby %v does not exist", target),
 			})
@@ -286,8 +288,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return status
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "LOBBY_INFO",
-				TTL:    1,
+				Opcode:   "LOBBY_INFO",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: lobby,
 		})
@@ -321,8 +324,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &args); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -338,8 +342,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if _, exists := server.Lobbies[AnyToString(args.LobbyID)]; exists {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "LOBBY_EXISTS",
-					TTL:    1,
+					Opcode:   "LOBBY_EXISTS",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: args.LobbyID,
 			})
@@ -352,8 +357,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := ValidateAnyType(args.LobbyID); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "lobby_id: " + err.Error(),
 			})
@@ -370,8 +376,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if !(*args.MaxPeers == -1) && *args.MaxPeers <= 0 {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "max_peers cannot be negative",
 			})
@@ -413,8 +420,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "CONFIG_HOST_ACK",
-				TTL:    1,
+				Opcode:   "CONFIG_HOST_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: args.LobbyID,
 		})
@@ -463,8 +471,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &args); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -476,8 +485,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if _, exists := server.Lobbies[AnyToString(args.LobbyID)]; !exists {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "LOBBY_NOTFOUND",
-					TTL:    1,
+					Opcode:   "LOBBY_NOTFOUND",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 			})
 			return
@@ -497,8 +507,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if lobby.Locked {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "LOBBY_LOCKED",
-					TTL:    1,
+					Opcode:   "LOBBY_LOCKED",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 			})
 			return
@@ -508,8 +519,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if lobby.MaxPeers != -1 && int64(len(server.Members[lobby])) >= lobby.MaxPeers {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "LOBBY_FULL",
-					TTL:    1,
+					Opcode:   "LOBBY_FULL",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 			})
 			return
@@ -522,8 +534,9 @@ func New(designation string, config *duplex.Config) *Instance {
 				// Peer did not provide a password
 				peer.Write(&duplex.TxPacket{
 					Packet: duplex.Packet{
-						Opcode: "PASSWORD_REQUIRED",
-						TTL:    1,
+						Opcode:   "PASSWORD_REQUIRED",
+						Listener: packet.Listener,
+						TTL:      1,
 					},
 				})
 				return
@@ -533,8 +546,9 @@ func New(designation string, config *duplex.Config) *Instance {
 				// Password is incorrect
 				peer.Write(&duplex.TxPacket{
 					Packet: duplex.Packet{
-						Opcode: "PASSWORD_FAIL",
-						TTL:    1,
+						Opcode:   "PASSWORD_FAIL",
+						Listener: packet.Listener,
+						TTL:      1,
 					},
 				})
 				return
@@ -572,8 +586,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "CONFIG_PEER_ACK",
-				TTL:    1,
+				Opcode:   "CONFIG_PEER_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: args.LobbyID,
 		})
@@ -603,7 +618,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	}, "discovery")
 
 	// LOBBY_LIST is a request for a list of lobbies.
-	server.Bind("LOBBY_LIST", func(peer *duplex.Peer, _ *duplex.RxPacket) {
+	server.Bind("LOBBY_LIST", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 
 		// Obtain lock
 		server.Mutex.Lock()
@@ -612,8 +627,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return current lobby list
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "LOBBY_LIST",
-				TTL:    1,
+				Opcode:   "LOBBY_LIST",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: server.Lobbies.ToSlice(),
 		})
@@ -623,7 +639,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	server.Bind("LOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -642,8 +658,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "LOCK_ACK",
-				TTL:    1,
+				Opcode:   "LOCK_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -652,7 +669,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	server.Bind("UNLOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -671,8 +688,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "UNLOCK_ACK",
-				TTL:    1,
+				Opcode:   "UNLOCK_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -680,7 +698,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// SIZE is an adminstrative command that can change the max player count of a lobby.
 	server.Bind("SIZE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -696,8 +714,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if packet.Payload == nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "payload: must be an integer",
 			})
@@ -709,8 +728,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &new_count); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -721,8 +741,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if new_count != -1 && new_count < 0 {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "payload: integer must be greater than 0 or set to -1",
 			})
@@ -736,8 +757,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "SIZE_ACK",
-				TTL:    1,
+				Opcode:   "SIZE_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -745,7 +767,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// PASSWORD is an adminstrative command that can change the password of a lobby.
 	server.Bind("PASSWORD", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -761,8 +783,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if packet.Payload == nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "payload: must be a string",
 			})
@@ -774,8 +797,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &new_password); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -790,8 +814,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "PASSWORD_ACK",
-				TTL:    1,
+				Opcode:   "PASSWORD_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -799,7 +824,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// KICK is an administrative command that can remove a peer from a lobby.
 	server.Bind("KICK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -815,8 +840,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if packet.Payload == nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "payload: must be a string",
 			})
@@ -842,8 +868,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if !ok {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "KICK_ACK",
-					TTL:    1,
+					Opcode:   "KICK_ACK",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: false,
 			})
@@ -894,8 +921,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "KICK_ACK",
-				TTL:    1,
+				Opcode:   "KICK_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: true,
 		})
@@ -905,7 +933,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// HIDE is an administrative command that can prevent a lobby from being shown in the lobby list or broadcasts.
 	server.Bind("HIDE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -924,8 +952,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "HIDE_ACK",
-				TTL:    1,
+				Opcode:   "HIDE_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -933,7 +962,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// SHOW is an administrative command that can allow a lobby from being shown in the lobby list list or broadcasts.
 	server.Bind("SHOW", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -953,8 +982,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "SHOW_ACK",
-				TTL:    1,
+				Opcode:   "SHOW_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 	}, "discovery")
@@ -962,7 +992,7 @@ func New(designation string, config *duplex.Config) *Instance {
 	// TRANSFER is an administrative command that can transfer a lobby to another peer.
 	server.Bind("TRANSFER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
@@ -974,8 +1004,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if packet.Payload == nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "payload: must be a string",
 			})
@@ -987,8 +1018,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &query); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -1001,8 +1033,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if !ok {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "TRANSFER_ACK",
-					TTL:    1,
+					Opcode:   "TRANSFER_ACK",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: false,
 			})
@@ -1064,8 +1097,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "TRANSFER_ACK",
-				TTL:    1,
+				Opcode:   "TRANSFER_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: true,
 		})
@@ -1080,8 +1114,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal(packet.Payload, &query); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -1154,15 +1189,16 @@ func New(designation string, config *duplex.Config) *Instance {
 	// LEAVE is a non-administrative command that can leave a lobby.
 	server.Bind("LEAVE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, false, true)
+		lobby, admin, halt := server.GetState(peer, false, true, packet)
 		if halt {
 			return
 		}
 		if admin {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "hosts may not use LEAVE, use CLOSE or TRANSFER instead",
 			})
@@ -1214,8 +1250,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "LEAVE_ACK",
-				TTL:    1,
+				Opcode:   "LEAVE_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: lobby.ID,
 		})
@@ -1224,15 +1261,16 @@ func New(designation string, config *duplex.Config) *Instance {
 	// CLOSE is an administrative command that can close a lobby.
 	server.Bind("CLOSE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 		// Get current lobby
-		lobby, admin, halt := server.GetState(peer, true, true)
+		lobby, admin, halt := server.GetState(peer, true, true, packet)
 		if halt {
 			return
 		}
 		if !admin {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "WARNING",
-					TTL:    1,
+					Opcode:   "WARNING",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: "members may not use CLOSE, use LEAVE instead",
 			})
@@ -1279,8 +1317,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "CLOSE_ACK",
-				TTL:    1,
+				Opcode:   "CLOSE_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: lobby.ID,
 		})
@@ -1294,8 +1333,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if err := json.Unmarshal([]byte(packet.Payload), &username); err != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: err.Error(),
 			})
@@ -1311,8 +1351,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		if server.NameRegistry[username] != nil {
 			peer.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 				Payload: fmt.Sprintf("Username %s is already in use", username),
 			})
@@ -1329,8 +1370,9 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Return success
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "REGISTER_ACK",
-				TTL:    1,
+				Opcode:   "REGISTER_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: username,
 		})
@@ -1361,8 +1403,8 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 		peer.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
 				Opcode:   "QUERY_ACK",
-				TTL:      1,
 				Listener: packet.Listener,
+				TTL:      1,
 			},
 			Payload: QueryAck{
 				Username: username,
@@ -1374,7 +1416,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 
 	// found
 	var isInLobby bool
-	lobby, isHost, _ := i.GetState(target, false, false)
+	lobby, isHost, _ := i.GetState(target, false, false, packet)
 	isInLobby = lobby != nil
 
 	response := &QueryAck{
@@ -1394,8 +1436,8 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 	peer.Write(&duplex.TxPacket{
 		Packet: duplex.Packet{
 			Opcode:   "QUERY_ACK",
-			TTL:      1,
 			Listener: packet.Listener,
+			TTL:      1,
 		},
 		Payload: response,
 	})
@@ -1405,7 +1447,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 // If the peer is not the host and emit_warn is true, it will send a "UNAUTHORIZED" packet to the peer.
 // If the peer is not in a lobby, it will send a "CONFIG_REQUIRED" packet to the peer.
 // If halt_if_fail is true, it will halt execution of the opcode handler if any state checks fail.
-func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (*Lobby, bool, bool) {
+func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool, packet *duplex.RxPacket) (*Lobby, bool, bool) {
 
 	// Get current lobby
 	lobby_id, ok := p.KeyStore["lobby"]
@@ -1413,8 +1455,9 @@ func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (
 		if emit_warn {
 			p.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "CONFIG_REQUIRED",
-					TTL:    1,
+					Opcode:   "CONFIG_REQUIRED",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 			})
 		}
@@ -1426,8 +1469,9 @@ func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (
 		if emit_warn {
 			p.Write(&duplex.TxPacket{
 				Packet: duplex.Packet{
-					Opcode: "CONFIG_REQUIRED",
-					TTL:    1,
+					Opcode:   "CONFIG_REQUIRED",
+					Listener: packet.Listener,
+					TTL:      1,
 				},
 			})
 		}
@@ -1443,8 +1487,9 @@ func (i *Instance) GetState(p *duplex.Peer, emit_warn bool, halt_if_fail bool) (
 	if !is_host && emit_warn {
 		p.Write(&duplex.TxPacket{
 			Packet: duplex.Packet{
-				Opcode: "UNAUTHORIZED",
-				TTL:    1,
+				Opcode:   "UNAUTHORIZED",
+				Listener: packet.Listener,
+				TTL:      1,
 			},
 		})
 		return lobby, false, halt_if_fail
