@@ -12,7 +12,7 @@ func main() {
 
 	// Define a globally unique designation that will be used to identify this discovery server.
 	// Our peer's ID will become "discovery@[DESIGNATION]".
-	const DESIGNATION = "US-NKY-1"
+	const DESIGNATION = "SOMEWHERE-EARTH"
 
 	// Initialize the discovery server
 	instance := discovery.New(DESIGNATION)
