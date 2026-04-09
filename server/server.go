@@ -99,12 +99,13 @@ func (l *Lobby) ComputeCount() {
 
 // Define Discovery server
 type Instance struct {
-	Designation  string
-	Lobbies      Lobbies
-	Hosts        Hosts
-	Members      Peers
-	Mutex        *sync.Mutex
-	NameRegistry map[string]*duplex.Peer
+	Designation    string
+	Lobbies        Lobbies
+	Hosts          Hosts
+	Members        Peers
+	Mutex          *sync.Mutex
+	NameRegistry   map[string]*duplex.Peer
+	BridgeRegistry map[string]*duplex.Peer
 	*duplex.Instance
 }
 
@@ -112,13 +113,14 @@ func New(designation string, config *duplex.Config) *Instance {
 
 	// Initialize duplex instance
 	server := &Instance{
-		Designation:  designation,
-		Instance:     duplex.New("discovery@"+designation, config),
-		Lobbies:      make(Lobbies),
-		Hosts:        make(Hosts),
-		Members:      make(Peers),
-		Mutex:        &sync.Mutex{},
-		NameRegistry: make(map[string]*duplex.Peer),
+		Designation:    designation,
+		Instance:       duplex.New("discovery@"+designation, config),
+		Lobbies:        make(Lobbies),
+		Hosts:          make(Hosts),
+		Members:        make(Peers),
+		Mutex:          &sync.Mutex{},
+		NameRegistry:   make(map[string]*duplex.Peer),
+		BridgeRegistry: make(map[string]*duplex.Peer),
 	}
 	server.IsDiscovery = true
 
@@ -134,20 +136,20 @@ func New(designation string, config *duplex.Config) *Instance {
 		defer server.Mutex.Unlock()
 
 		// Check if the registry has a match
-		if server.NameRegistry[username] != nil {
-			peer.Write(&duplex.TxPacket{
+		if server.BridgeRegistry[username] != nil {
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode: "VIOLATION",
 					TTL:    1,
 				},
-				Payload: fmt.Sprintf("Automatic registration failure: Username %s is already in use", username),
+				Payload: fmt.Sprintf("Automatic registration failure: Bridge registry item %s is already in use", username),
 			})
 			peer.Close()
 			return
 		}
 
 		// Register peer
-		server.NameRegistry[username] = peer
+		server.BridgeRegistry[username] = peer
 
 		// Obtain lock and set name
 		peer.KeyStore["name"] = username
@@ -187,7 +189,19 @@ func New(designation string, config *duplex.Config) *Instance {
 			Payload: server.Lobbies.ToSlice(),
 		})
 
-		// TODO: spawn a thread that periodically PING/PONGs the newly connected peer to calculate RTT
+		// Announce all connected bridge servers available for connecting
+		for bridge := range server.BridgeRegistry {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "DISCOVER",
+					TTL:    1,
+				},
+				Payload: bridge,
+			})
+		}
+
+		// Spawn a thread that periodically PING/PONGs the newly connected peer to calculate RTT
+		go server.SpawnTicker(peer)
 	}
 
 	// server.OnClose gets called when a peer disconnects.
@@ -198,6 +212,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		if name_set {
 			if _n, ok := name.(string); ok {
 				delete(server.NameRegistry, _n)
+				delete(server.BridgeRegistry, _n)
 			}
 		}
 
@@ -368,7 +383,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read arguments
 		var args ConfigHostArgs
 		if err := json.Unmarshal(packet.Payload, &args); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -515,7 +530,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read arguments
 		var args ConfigPeerArgs
 		if err := json.Unmarshal(packet.Payload, &args); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -772,7 +787,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read new value
 		var new_count int64
 		if err := json.Unmarshal(packet.Payload, &new_count); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -841,7 +856,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read new value
 		var new_password string
 		if err := json.Unmarshal(packet.Payload, &new_password); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -898,7 +913,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read new value
 		var query string
 		if err := json.Unmarshal(packet.Payload, &query); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode: "VIOLATION",
 					TTL:    1,
@@ -1062,7 +1077,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read new value
 		var query string
 		if err := json.Unmarshal(packet.Payload, &query); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -1158,7 +1173,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read the payload as a query argument
 		var query string
 		if err := json.Unmarshal(packet.Payload, &query); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -1377,7 +1392,7 @@ func New(designation string, config *duplex.Config) *Instance {
 		// Read desired username
 		var username string
 		if err := json.Unmarshal([]byte(packet.Payload), &username); err != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -1395,7 +1410,7 @@ func New(designation string, config *duplex.Config) *Instance {
 
 		// Check if the registry has a match
 		if server.NameRegistry[username] != nil {
-			peer.Write(&duplex.TxPacket{
+			peer.WriteBlocking(&duplex.TxPacket{
 				Packet: duplex.Packet{
 					Opcode:   "VIOLATION",
 					Listener: packet.Listener,
@@ -1473,6 +1488,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 		IsLobbyMember: isInLobby && !isHost,
 		IsLobbyHost:   isInLobby && isHost,
 		IsInLobby:     isInLobby,
+		RTT:           target.RTT,
 	}
 
 	if isInLobby {
