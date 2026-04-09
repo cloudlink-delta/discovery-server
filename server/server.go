@@ -125,6 +125,52 @@ func New(designation string, config *duplex.Config) *Instance {
 	// server.OnOpen gets called immediately when a peer connects.
 	server.OnOpen = func(_ *duplex.Peer) {}
 
+	server.OnBridgeConnected = func(peer *duplex.Peer) {
+		username := peer.GetPeerID()
+		log.Printf("Automatically registering bridge server %s", username)
+
+		// Obtain lock
+		server.Mutex.Lock()
+		defer server.Mutex.Unlock()
+
+		// Check if the registry has a match
+		if server.NameRegistry[username] != nil {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode: "VIOLATION",
+					TTL:    1,
+				},
+				Payload: fmt.Sprintf("Automatic registration failure: Username %s is already in use", username),
+			})
+			peer.Close()
+			return
+		}
+
+		// Register peer
+		server.NameRegistry[username] = peer
+
+		// Obtain lock and set name
+		peer.KeyStore["name"] = username
+
+		// Return success
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "AUTO_REGISTER",
+				TTL:    1,
+			},
+			Payload: username,
+		})
+
+		// Announce to all other connected peers that the server is available
+		server.Broadcast(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "DISCOVER",
+				TTL:    1,
+			},
+			Payload: username,
+		}, server.Peers.ToSlice(peer))
+	}
+
 	// server.AfterNegotiation gets called after both our peer and the peer we just connected negotiates successfully.
 	server.AfterNegotiation = func(peer *duplex.Peer) {
 
