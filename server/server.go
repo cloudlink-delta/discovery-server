@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ type QueryAck struct {
 	IsInLobby     bool   `json:"is_in_lobby,omitempty"`
 	LobbyID       string `json:"lobby_id,omitempty"`
 	RTT           int64  `json:"rtt,omitempty"`
+	IsLegacy      bool   `json:"is_legacy,omitempty"`
+	IsRelayed     bool   `json:"is_relayed,omitempty"`
+	RelayPeer     string `json:"relay_peer,omitempty"`
 }
 
 // Define type aliases
@@ -97,15 +101,18 @@ func (l *Lobby) ComputeCount() {
 	l.CurrentPeers = int64(len(l.Instance.Members[l]))
 }
 
+type Registry map[string]*duplex.Peer
+
 // Define Discovery server
 type Instance struct {
-	Designation    string
-	Lobbies        Lobbies
-	Hosts          Hosts
-	Members        Peers
-	Mutex          *sync.Mutex
-	NameRegistry   map[string]*duplex.Peer
-	BridgeRegistry map[string]*duplex.Peer
+	Designation       string
+	Lobbies           Lobbies
+	Hosts             Hosts
+	Members           Peers
+	Mutex             *sync.Mutex
+	NameRegistry      Registry
+	BridgeRegistry    Registry
+	DiscoveryRegistry Registry
 	*duplex.Instance
 }
 
@@ -113,14 +120,15 @@ func New(designation string, config *duplex.Config) *Instance {
 
 	// Initialize duplex instance
 	server := &Instance{
-		Designation:    designation,
-		Instance:       duplex.New("discovery@"+designation, config),
-		Lobbies:        make(Lobbies),
-		Hosts:          make(Hosts),
-		Members:        make(Peers),
-		Mutex:          &sync.Mutex{},
-		NameRegistry:   make(map[string]*duplex.Peer),
-		BridgeRegistry: make(map[string]*duplex.Peer),
+		Designation:       designation,
+		Instance:          duplex.New("discovery@"+designation, config),
+		Lobbies:           make(Lobbies),
+		Hosts:             make(Hosts),
+		Members:           make(Peers),
+		Mutex:             &sync.Mutex{},
+		NameRegistry:      make(Registry),
+		BridgeRegistry:    make(Registry),
+		DiscoveryRegistry: make(Registry),
 	}
 	server.IsDiscovery = true
 
@@ -128,40 +136,9 @@ func New(designation string, config *duplex.Config) *Instance {
 	server.OnOpen = func(_ *duplex.Peer) {}
 
 	server.OnBridgeConnected = func(peer *duplex.Peer) {
-		username := peer.GetPeerID()
-		log.Printf("Automatically registering bridge server %s", username)
 
-		// Obtain lock
-		server.Mutex.Lock()
-		defer server.Mutex.Unlock()
-
-		// Check if the registry has a match
-		if server.BridgeRegistry[username] != nil {
-			peer.WriteBlocking(&duplex.TxPacket{
-				Packet: duplex.Packet{
-					Opcode: "VIOLATION",
-					TTL:    1,
-				},
-				Payload: fmt.Sprintf("Automatic registration failure: Bridge registry item %s is already in use", username),
-			})
-			peer.Close()
-			return
-		}
-
-		// Register peer
-		server.BridgeRegistry[username] = peer
-
-		// Obtain lock and set name
-		peer.KeyStore["name"] = username
-
-		// Return success
-		peer.Write(&duplex.TxPacket{
-			Packet: duplex.Packet{
-				Opcode: "AUTO_REGISTER",
-				TTL:    1,
-			},
-			Payload: username,
-		})
+		// Automatically register the bridge
+		server.AutoRegister(peer, server.BridgeRegistry)
 
 		// Announce to all other connected peers that the server is available
 		server.Broadcast(&duplex.TxPacket{
@@ -169,8 +146,15 @@ func New(designation string, config *duplex.Config) *Instance {
 				Opcode: "DISCOVER",
 				TTL:    1,
 			},
-			Payload: username,
+			Payload: peer.GetPeerID(),
 		}, server.Peers.ToSlice(peer))
+	}
+
+	server.OnDiscoveryConnected = func(peer *duplex.Peer) {
+
+		// Automatically register the discovery server
+		server.AutoRegister(peer, server.DiscoveryRegistry)
+
 	}
 
 	// server.AfterNegotiation gets called after both our peer and the peer we just connected negotiates successfully.
@@ -355,7 +339,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: lobby,
 		})
-	}, "discovery")
+	})
 
 	/*
 	 * CONFIG_HOST is a request to create a new lobby.
@@ -511,7 +495,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: lobby.ID,
 		}, server.Peers.ToSlice(peer))
-	}, "discovery")
+	})
 
 	/* CONFIG_PEER is a request to join a lobby.
 	 * {
@@ -676,7 +660,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: peer.GetPeerID(),
 		})
-	}, "discovery")
+	})
 
 	// LOBBY_LIST is a request for a list of lobbies.
 	server.Bind("LOBBY_LIST", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -694,7 +678,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: server.Lobbies.ToSlice(),
 		})
-	}, "discovery")
+	})
 
 	// LOCK is an administrative command that can lock access to a lobby.
 	server.Bind("LOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -724,7 +708,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// UNLOCK is an administrative command that can unlock access to a lobby.
 	server.Bind("UNLOCK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -754,7 +738,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// SIZE is an adminstrative command that can change the max player count of a lobby.
 	server.Bind("SIZE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -823,7 +807,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// PASSWORD is an adminstrative command that can change the password of a lobby.
 	server.Bind("PASSWORD", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -880,7 +864,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// KICK is an administrative command that can remove a peer from a lobby.
 	server.Bind("KICK", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -989,7 +973,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			Payload: true,
 		})
 
-	}, "discovery")
+	})
 
 	// HIDE is an administrative command that can prevent a lobby from being shown in the lobby list or broadcasts.
 	server.Bind("HIDE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1018,7 +1002,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// SHOW is an administrative command that can allow a lobby from being shown in the lobby list list or broadcasts.
 	server.Bind("SHOW", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1048,7 +1032,7 @@ func New(designation string, config *duplex.Config) *Instance {
 				TTL:      1,
 			},
 		})
-	}, "discovery")
+	})
 
 	// TRANSFER is an administrative command that can transfer a lobby to another peer.
 	server.Bind("TRANSFER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1165,7 +1149,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			Payload: true,
 		})
 
-	}, "discovery")
+	})
 
 	// QUERY returns details about a connected peer, including the lobby they are in, their RTT to the server, and roles.
 	server.Bind("QUERY", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1187,8 +1171,6 @@ func New(designation string, config *duplex.Config) *Instance {
 
 		// detect if this is a plain username or a username with a suffix
 		parts := strings.Split(query, "@")
-		log.Println("QUERY:", query)
-		log.Println("Parts:", parts)
 
 		if len(parts) == 1 {
 			server.ResolvePeer(parts[0], peer, packet)
@@ -1202,50 +1184,17 @@ func New(designation string, config *duplex.Config) *Instance {
 
 			} else {
 
-				// Try to find target discovery server
-				target, ok := server.Peers["discovery@"+parts[1]]
-				if !ok {
+				// Ask all connected discovery servers to try and find it
+				server.Mutex.Lock()
+				streams := make(Registry)
+				maps.Copy(streams, server.DiscoveryRegistry)
+				server.Mutex.Unlock()
 
-					// There is no one to be resolved
-					peer.Write(&duplex.TxPacket{
-						Packet: duplex.Packet{
-							Opcode: "QUERY_ACK",
-							TTL:    1,
-						},
-						Payload: QueryAck{
-							Username: parts[0],
-							Online:   false,
-						},
-					})
-					return
-				}
-
-				// Generate a unique listener UUID
-				listener_id, _ := uuid.NewRandom()
-
-				// Send request to the designation's discovery server
-				reply := target.SendAndWaitForReply(&duplex.TxPacket{
-					Packet: duplex.Packet{
-						Opcode:   "QUERY",
-						TTL:      1,
-						Listener: listener_id.String(),
-					},
-					Payload: packet.Payload,
-				})
-
-				// Forward the response back to the client
-				resp := &duplex.TxPacket{
-					Packet: duplex.Packet{
-						Opcode:   "QUERY_ACK",
-						TTL:      1,
-						Listener: packet.Listener,
-					},
-					Payload: reply.Payload,
-				}
-				peer.Write(resp)
+				server.Multiquery(query, peer, packet, streams)
 			}
 		}
-	}, "discovery")
+
+	})
 
 	// LEAVE is a non-administrative command that can leave a lobby.
 	server.Bind("LEAVE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1317,7 +1266,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: lobby.ID,
 		})
-	}, "discovery")
+	})
 
 	// CLOSE is an administrative command that can close a lobby.
 	server.Bind("CLOSE", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1384,7 +1333,7 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: lobby.ID,
 		})
-	}, "discovery")
+	})
 
 	// REGISTER programs a peer's preferred name, since discovery services require unique connection identifiers.
 	server.Bind("REGISTER", func(peer *duplex.Peer, packet *duplex.RxPacket) {
@@ -1437,9 +1386,143 @@ func New(designation string, config *duplex.Config) *Instance {
 			},
 			Payload: username,
 		})
-	}, "discovery")
+	})
+
+	// Stub handler that automatically declines incoming call requests
+	server.Bind("CALL", func(peer *duplex.Peer, _ *duplex.RxPacket) {
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "DECLINE",
+				TTL:    1,
+			},
+		})
+	})
 
 	return server
+}
+
+func (server *Instance) AutoRegister(peer *duplex.Peer, registry Registry) {
+	username := peer.GetPeerID()
+	log.Printf("Automatically registering %s", username)
+
+	// Obtain lock
+	server.Mutex.Lock()
+	defer server.Mutex.Unlock()
+
+	// Check if the registry has a match
+	if registry[username] != nil {
+		peer.WriteBlocking(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode: "VIOLATION",
+				TTL:    1,
+			},
+			Payload: fmt.Sprintf("Automatic registration failure: Registry item %s is already in use", username),
+		})
+		peer.Close()
+		return
+	}
+
+	// Register peer
+	registry[username] = peer
+
+	// Obtain lock and set name
+	peer.KeyStore["name"] = username
+
+	// Return success
+	peer.Write(&duplex.TxPacket{
+		Packet: duplex.Packet{
+			Opcode: "AUTO_REGISTER",
+			TTL:    1,
+		},
+		Payload: username,
+	})
+}
+
+func (i *Instance) Multiquery(username string, peer *duplex.Peer, packet *duplex.RxPacket, streams Registry) {
+
+	query_resolver := func(upstream *duplex.Peer) json.RawMessage {
+
+		// Generate a unique listener UUID
+		listener_id, _ := uuid.NewRandom()
+
+		// Send request to the designation's discovery server
+		reply := upstream.SendAndWaitForReply(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode:   "QUERY",
+				TTL:      1,
+				Listener: listener_id.String(),
+			},
+			Payload: packet.Payload,
+		})
+
+		if reply.Opcode != "QUERY_ACK" {
+			log.Printf("Multiquery error: %s replied with %v", upstream.GetPeerID(), reply)
+			return nil
+		}
+
+		return reply.Payload
+	}
+
+	// Try to forward the request to available upstreams
+	var wg sync.WaitGroup
+	var valid_mux sync.Mutex
+	valid_responses := make([]json.RawMessage, 0)
+	for _, bridge := range streams {
+		wg.Add(1)
+
+		// Simultaneously ask all possible upstreams for the request
+		go func(upstream *duplex.Peer) {
+			defer wg.Done()
+			if reply := query_resolver(upstream); reply != nil {
+				valid_mux.Lock()
+				defer valid_mux.Unlock()
+				valid_responses = append(valid_responses, reply)
+			}
+		}(bridge)
+
+	}
+
+	// Wait for all simultaneous queries to resolve
+	wg.Wait()
+
+	// No valid replies present,
+	if len(valid_responses) == 0 {
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode:   "QUERY_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
+			},
+			Payload: QueryAck{
+				Username: username,
+				Online:   false,
+			},
+		})
+		return
+	}
+
+	// If there are multiple options present, use the MULTI_QUERY_ACK response.
+	if len(valid_responses) > 1 {
+		peer.Write(&duplex.TxPacket{
+			Packet: duplex.Packet{
+				Opcode:   "MULTI_QUERY_ACK",
+				Listener: packet.Listener,
+				TTL:      1,
+			},
+			Payload: valid_responses,
+		})
+		return
+	}
+
+	// Just use the normal QUERY_ACK response.
+	peer.Write(&duplex.TxPacket{
+		Packet: duplex.Packet{
+			Opcode:   "QUERY_ACK",
+			Listener: packet.Listener,
+			TTL:      1,
+		},
+		Payload: valid_responses[0],
+	})
 }
 
 // ResolvePeer is a function that resolves a peer based on a query string.
@@ -1455,30 +1538,51 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 
 	// Obtain lock
 	i.Mutex.Lock()
-	defer i.Mutex.Unlock()
 
-	target, exists := i.NameRegistry[username]
+	target, locally_exists := i.NameRegistry[username]
+	bridges := make(Registry)
+	for k, v := range i.BridgeRegistry {
+		bridges[k] = v
+	}
 
-	// not found
-	if !exists {
-		peer.Write(&duplex.TxPacket{
-			Packet: duplex.Packet{
-				Opcode:   "QUERY_ACK",
-				Listener: packet.Listener,
-				TTL:      1,
-			},
-			Payload: QueryAck{
-				Username: username,
-				Online:   false,
-			},
-		})
+	i.Mutex.Unlock()
+
+	// Not found
+	if !locally_exists {
+
+		// No upstream bridges to query
+		if len(bridges) == 0 {
+			peer.Write(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode:   "QUERY_ACK",
+					Listener: packet.Listener,
+					TTL:      1,
+				},
+				Payload: QueryAck{
+					Username: username,
+					Online:   false,
+				},
+			})
+
+		} else {
+
+			// Ask all connected bridges to try and find it
+			i.Multiquery(username, peer, packet, bridges)
+
+		}
 		return
 	}
 
 	// found
-	var isInLobby bool
+	i.Mutex.Lock()
 	lobby, isHost, _ := i.GetState(target, false, false, packet)
-	isInLobby = lobby != nil
+	var lobbyID string
+	var isInLobby bool
+	if lobby != nil {
+		isInLobby = true
+		lobbyID = AnyToString(lobby.ID)
+	}
+	i.Mutex.Unlock()
 
 	response := &QueryAck{
 		Online:        true,
@@ -1489,10 +1593,12 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 		IsLobbyHost:   isInLobby && isHost,
 		IsInLobby:     isInLobby,
 		RTT:           target.RTT,
+		IsLegacy:      false, // Always false if we're the Discovery server. Bridge servers will always reply with this set to true.
+		IsRelayed:     false, // TODO: tweak this in case of a relay server is present. Bridge servers will always reply with this set to true.
 	}
 
 	if isInLobby {
-		response.LobbyID = AnyToString(lobby.ID)
+		response.LobbyID = lobbyID
 	}
 
 	peer.Write(&duplex.TxPacket{
