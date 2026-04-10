@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"regexp"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/goccy/go-json"
@@ -42,6 +42,8 @@ type QueryAck struct {
 	IsLegacy      bool   `json:"is_legacy,omitempty"`
 	IsRelayed     bool   `json:"is_relayed,omitempty"`
 	RelayPeer     string `json:"relay_peer,omitempty"`
+	IsBridge      bool   `json:"is_bridge,omitempty"`
+	IsDiscovery   bool   `json:"is_discovery,omitempty"`
 }
 
 // Define type aliases
@@ -1151,6 +1153,8 @@ func New(designation string, config *duplex.Config) *Instance {
 
 	})
 
+	var queryRegex = regexp.MustCompile(`^([^.@]+)(?:\.([^@]+))?(?:@(.+))?$`)
+
 	// QUERY returns details about a connected peer, including the lobby they are in, their RTT to the server, and roles.
 	server.Bind("QUERY", func(peer *duplex.Peer, packet *duplex.RxPacket) {
 
@@ -1169,30 +1173,72 @@ func New(designation string, config *duplex.Config) *Instance {
 			return
 		}
 
-		// detect if this is a plain username or a username with a suffix
-		parts := strings.Split(query, "@")
-
-		if len(parts) == 1 {
-			server.ResolvePeer(parts[0], peer, packet)
-
-		} else {
-
-			// username with specific designation (i.e. "bob@US-NKY-1")
-			// Check if the designation is our own, if so, use our local resolver
-			if parts[1] == server.Designation {
-				server.ResolvePeer(parts[0], peer, packet)
-
-			} else {
-
-				// Ask all connected discovery servers to try and find it
-				server.Mutex.Lock()
-				streams := make(Registry)
-				maps.Copy(streams, server.DiscoveryRegistry)
-				server.Mutex.Unlock()
-
-				server.Multiquery(query, peer, packet, streams)
-			}
+		matches := queryRegex.FindStringSubmatch(query)
+		if matches == nil {
+			peer.WriteBlocking(&duplex.TxPacket{
+				Packet: duplex.Packet{
+					Opcode:   "VIOLATION",
+					Listener: packet.Listener,
+					TTL:      1,
+				},
+				Payload: "Invalid query format",
+			})
+			peer.Close()
+			return
 		}
+
+		username := matches[1]
+		bridge := matches[2]
+		designation := matches[3]
+
+		// 1. If it's for a specific designation that isn't ours, ask discovery servers
+		if designation != "" && designation != server.Designation {
+			server.Mutex.Lock()
+			streams := make(Registry)
+			maps.Copy(streams, server.DiscoveryRegistry)
+			server.Mutex.Unlock()
+
+			server.Multiquery(query, peer, packet, streams)
+			return
+		}
+
+		// 2. If it targets a specific bridge
+		if bridge != "" {
+			server.Mutex.Lock()
+			var bridgePeer *duplex.Peer
+			var exists bool
+
+			bridgePeer, exists = server.BridgeRegistry[bridge]
+			if !exists && designation == "" {
+				bridgePeer, exists = server.BridgeRegistry[bridge+"@"+server.Designation]
+			}
+			if !exists && designation != "" {
+				bridgePeer, exists = server.BridgeRegistry[bridge+"@"+designation]
+			}
+			server.Mutex.Unlock()
+
+			if exists {
+				// Ask the specific upstream bridge
+				server.Multiquery(query, peer, packet, Registry{bridge: bridgePeer})
+			} else {
+				// Bridge not found
+				peer.Write(&duplex.TxPacket{
+					Packet: duplex.Packet{
+						Opcode:   "QUERY_ACK",
+						Listener: packet.Listener,
+						TTL:      1,
+					},
+					Payload: QueryAck{
+						Username: query,
+						Online:   false,
+					},
+				})
+			}
+			return
+		}
+
+		// 3. Otherwise, use the local resolver
+		server.ResolvePeer(username, peer, packet)
 
 	})
 
@@ -1540,6 +1586,18 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 	i.Mutex.Lock()
 
 	target, locally_exists := i.NameRegistry[username]
+	if !locally_exists {
+		target, locally_exists = i.BridgeRegistry[username]
+	}
+	if !locally_exists {
+		target, locally_exists = i.BridgeRegistry[username+"@"+i.Designation]
+	}
+	if !locally_exists {
+		target, locally_exists = i.DiscoveryRegistry[username]
+	}
+	if !locally_exists {
+		target, locally_exists = i.DiscoveryRegistry[username+"@"+i.Designation]
+	}
 	bridges := make(Registry)
 	for k, v := range i.BridgeRegistry {
 		bridges[k] = v
@@ -1595,6 +1653,8 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 		RTT:           target.RTT,
 		IsLegacy:      false, // Always false if we're the Discovery server. Bridge servers will always reply with this set to true.
 		IsRelayed:     false, // TODO: tweak this in case of a relay server is present. Bridge servers will always reply with this set to true.
+		IsBridge:      target.IsBridge,
+		IsDiscovery:   target.IsDiscovery,
 	}
 
 	if isInLobby {
