@@ -16,20 +16,22 @@ import (
 
 // Define a struct to hold lobby data
 type Lobby struct {
-	ID               any        `json:"lobby_id"`      // ID of the lobby
-	Host             string     `json:"host"`          // Host of the lobby
-	CurrentPeers     int64      `json:"current_peers"` // Number of peers currently in the lobby
-	MaxPeers         int64      `json:"max_peers"`     // Maximum number of peers allowed in the lobby
-	PasswordRequired bool       `json:"password_required"`
-	Hidden           bool       `json:"hidden"`   // Whether the lobby is hidden
-	Locked           bool       `json:"locked"`   // Whether the lobby is locked
-	Metadata         any        `json:"metadata"` // Arbitrary, user-defined storage
-	Password         string     `json:"-"`        // Password for the lobby
-	Instance         *Instance  `json:"-"`        // Pointer to the instance
-	*sync.Mutex      `json:"-"` // Mutex for thread safety
+	ID               any           `json:"lobby_id"`          // ID of the lobby
+	Host             string        `json:"host"`              // Host of the lobby
+	CurrentPeers     int64         `json:"current_peers"`     // Number of peers currently in the lobby
+	MaxPeers         int64         `json:"max_peers"`         // Maximum number of peers allowed in the lobby
+	PasswordRequired bool          `json:"password_required"` // Whether the lobby requires a password
+	Hidden           bool          `json:"hidden"`            // Whether the lobby is hidden
+	Locked           bool          `json:"locked"`            // Whether the lobby is locked
+	Metadata         any           `json:"metadata"`          // Arbitrary, user-defined storage
+	Peers            []*PeerObject `json:"peers"`             // List of peers in the lobby (shortcut for querying peers)
+
+	Password    string     `json:"-"` // Password for the lobby
+	Instance    *Instance  `json:"-"` // Pointer to the instance
+	*sync.Mutex `json:"-"` // Mutex for thread safety
 }
 
-type QueryAck struct {
+type PeerObject struct {
 	Online        bool   `json:"online"`
 	Username      string `json:"username,omitempty"`
 	Designation   string `json:"designation,omitempty"`
@@ -89,6 +91,7 @@ func (l *Lobby) Remove(peer *duplex.Peer) {
 func (l *Lobby) PrecomputeTasks() {
 	l.GetHost()
 	l.ComputeCount()
+	l.GetPeers()
 }
 
 func (l *Lobby) GetHost() {
@@ -96,6 +99,22 @@ func (l *Lobby) GetHost() {
 		l.Host = l.Instance.Members[l][0].GetPeerID()
 	} else {
 		l.Host = ""
+	}
+}
+
+func (l *Lobby) GetPeers() {
+	l.Peers = make([]*PeerObject, len(l.Instance.Members[l]))
+	for i, peer := range l.Instance.Members[l] {
+		_, isHost, _ := l.Instance.GetState(peer, false, false, nil)
+		l.Peers[i] = &PeerObject{
+			Username:    peer.GiveName(),
+			Designation: l.Instance.Designation,
+			InstanceID:  peer.GetPeerID(),
+			IsLobbyHost: isHost,
+			RTT:         peer.RTT,
+			IsBridge:    peer.IsBridge,
+			IsDiscovery: peer.IsDiscovery,
+		}
 	}
 }
 
@@ -1228,7 +1247,7 @@ func New(designation string, config *duplex.Config) *Instance {
 						Listener: packet.Listener,
 						TTL:      1,
 					},
-					Payload: QueryAck{
+					Payload: PeerObject{
 						Username: query,
 						Online:   false,
 					},
@@ -1539,7 +1558,7 @@ func (i *Instance) Multiquery(username string, peer *duplex.Peer, packet *duplex
 				Listener: packet.Listener,
 				TTL:      1,
 			},
-			Payload: QueryAck{
+			Payload: PeerObject{
 				Username: username,
 				Online:   false,
 			},
@@ -1616,7 +1635,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 					Listener: packet.Listener,
 					TTL:      1,
 				},
-				Payload: QueryAck{
+				Payload: PeerObject{
 					Username: username,
 					Online:   false,
 				},
@@ -1642,7 +1661,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 	}
 	i.Mutex.Unlock()
 
-	response := &QueryAck{
+	response := &PeerObject{
 		Online:        true,
 		Username:      username,
 		Designation:   i.Designation,
