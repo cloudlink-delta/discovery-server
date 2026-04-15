@@ -27,6 +27,7 @@ func main() {
 	sessionServerPort := flag.Int("session-port", 443, "Port where the session server is listening (required if session-hostname is set)")
 	sessionServerHostname := flag.String("session-hostname", "", "Hostname where the session server is listening")
 	iceServersFlag := flag.String("ice-servers", "", "JSON-encoded array of ICE servers")
+	address := flag.String("address", "127.0.0.1:3001", "Discovery server listener address")
 
 	// Parse command-line flags
 	flag.Usage = func() {
@@ -43,6 +44,7 @@ func main() {
 		Secure:       true,
 		Port:         443,
 	}
+	listenerAddress := "127.0.0.1:3001"
 
 	// Parser checks
 	sessionHostnameProvided := false
@@ -62,6 +64,7 @@ func main() {
 			SessionHostname *string            `json:"session_hostname"`
 			SessionSecure   *bool              `json:"session_secure"`
 			SessionPort     *int               `json:"session_port"`
+			Address         *string            `json:"address"`
 		}
 
 		if err := json.Unmarshal(data, &fileCfg); err != nil {
@@ -86,6 +89,9 @@ func main() {
 			duplexCfg.Port = *fileCfg.SessionPort
 			sessionPortProvided = true
 		}
+		if fileCfg.Address != nil {
+			listenerAddress = *fileCfg.Address
+		}
 	}
 
 	// Override with explicitly set command-line flags
@@ -108,6 +114,8 @@ func main() {
 		case "session-hostname":
 			duplexCfg.Hostname = *sessionServerHostname
 			sessionHostnameProvided = true
+		case "address":
+			listenerAddress = *address
 		case "ice-servers":
 			var iceServers []webrtc.ICEServer
 			if err := json.Unmarshal([]byte(*iceServersFlag), &iceServers); err != nil {
@@ -128,7 +136,7 @@ func main() {
 	}
 
 	// Initialize the discovery server
-	instance := discovery.New(designation, &duplexCfg)
+	instance := discovery.New(designation, listenerAddress, &duplexCfg)
 
 	// Graceful shutdown handler
 	c := make(chan os.Signal, 1)

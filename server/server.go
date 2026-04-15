@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/goccy/go-json"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
 	"github.com/cloudlink-delta/duplex"
@@ -134,10 +135,12 @@ type Instance struct {
 	NameRegistry      Registry
 	BridgeRegistry    Registry
 	DiscoveryRegistry Registry
+	App               *fiber.App
+	Address           string
 	*duplex.Instance
 }
 
-func New(designation string, config *duplex.Config) *Instance {
+func New(designation string, address string, config *duplex.Config) *Instance {
 
 	// Initialize duplex instance
 	server := &Instance{
@@ -150,8 +153,26 @@ func New(designation string, config *duplex.Config) *Instance {
 		NameRegistry:      make(Registry),
 		BridgeRegistry:    make(Registry),
 		DiscoveryRegistry: make(Registry),
+		Address:           address,
+		App: fiber.New(fiber.Config{
+			JSONEncoder: json.Marshal,
+			JSONDecoder: json.Unmarshal,
+		}),
 	}
 	server.IsDiscovery = true
+
+	// Configure Health endpoint
+	server.App.Get("/health", func(c *fiber.Ctx) error {
+		server.Mutex.Lock()
+		defer server.Mutex.Unlock()
+		return c.JSON(fiber.Map{
+			"status":            server.GetPeerState(),
+			"lobbies_active":    len(server.Lobbies),
+			"members_connected": len(server.NameRegistry),
+			"bridge_servers":    len(server.BridgeRegistry),
+			"discovery_servers": len(server.DiscoveryRegistry),
+		})
+	})
 
 	// server.OnOpen gets called immediately when a peer connects.
 	server.OnOpen = func(_ *duplex.Peer) {}
@@ -1688,6 +1709,16 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 		},
 		Payload: response,
 	})
+}
+
+func (i *Instance) Run() {
+	go func() {
+		if err := i.App.Listen(i.Address); err != nil {
+			log.Printf("Fiber app error: %v", err)
+		}
+	}()
+	i.Instance.Run()
+	_ = i.App.Shutdown()
 }
 
 // GetState returns the current lobby and whether the peer is the host or not.
