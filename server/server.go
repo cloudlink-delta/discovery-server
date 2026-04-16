@@ -128,16 +128,17 @@ type Registry map[string]*duplex.Peer
 
 // Define Discovery server
 type Instance struct {
-	Designation       string
-	Lobbies           Lobbies
-	Hosts             Hosts
-	Members           Peers
-	Mutex             *sync.Mutex
-	NameRegistry      Registry
-	BridgeRegistry    Registry
-	DiscoveryRegistry Registry
-	App               *fiber.App
-	Address           string
+	Designation           string
+	Lobbies               Lobbies
+	Hosts                 Hosts
+	Members               Peers
+	Mutex                 *sync.Mutex
+	NameRegistry          Registry
+	BridgeRegistry        Registry
+	DiscoveryRegistry     Registry
+	App                   *fiber.App
+	Address               string
+	Predisposed_Instances []string
 	*duplex.Instance
 }
 
@@ -179,7 +180,13 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 	server.App.Get("/metrics", monitor.New())
 
 	// server.OnOpen gets called immediately when a peer connects.
-	server.OnOpen = func(_ *duplex.Peer) {}
+	server.OnCreate = func() {
+
+		// Establish a connection to every predisposed instance.
+		for _, instance := range server.Predisposed_Instances {
+			server.Instance.Connect(instance)
+		}
+	}
 
 	server.OnBridgeConnected = func(peer *duplex.Peer) {
 
