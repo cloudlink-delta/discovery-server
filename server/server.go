@@ -9,7 +9,8 @@ import (
 	"sync"
 
 	"github.com/goccy/go-json"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/contrib/v3/monitor"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/cloudlink-delta/duplex"
@@ -162,7 +163,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 	server.IsDiscovery = true
 
 	// Configure Health endpoint
-	server.App.Get("/health", func(c *fiber.Ctx) error {
+	server.App.Get("/health", func(c fiber.Ctx) error {
 		server.Mutex.Lock()
 		defer server.Mutex.Unlock()
 		return c.JSON(fiber.Map{
@@ -173,6 +174,8 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 			"discovery_servers": len(server.DiscoveryRegistry),
 		})
 	})
+
+	server.App.Get("/metrics", monitor.New())
 
 	// server.OnOpen gets called immediately when a peer connects.
 	server.OnOpen = func(_ *duplex.Peer) {}
