@@ -156,8 +156,9 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		DiscoveryRegistry: make(Registry),
 		Address:           address,
 		App: fiber.New(fiber.Config{
-			JSONEncoder: json.Marshal,
-			JSONDecoder: json.Unmarshal,
+			JSONEncoder:   json.Marshal,
+			JSONDecoder:   json.Unmarshal,
+			StrictRouting: true,
 		}),
 	}
 	server.IsDiscovery = true
