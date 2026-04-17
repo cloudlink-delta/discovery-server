@@ -60,6 +60,9 @@ func main() {
 
 		var fileCfg struct {
 			Designation     *string            `json:"designation"`
+			EnablePinger    *bool              `json:"enable_pinger"`
+			PingInterval    *int64             `json:"ping_interval"`
+			VeryVerbose     *bool              `json:"very_verbose"`
 			ICEServers      []webrtc.ICEServer `json:"ice_servers"`
 			SessionHostname *string            `json:"session_hostname"`
 			SessionSecure   *bool              `json:"session_secure"`
@@ -91,6 +94,15 @@ func main() {
 		}
 		if fileCfg.Address != nil {
 			listenerAddress = *fileCfg.Address
+		}
+		if fileCfg.EnablePinger != nil {
+			duplexCfg.EnablePinger = *fileCfg.EnablePinger
+		}
+		if fileCfg.PingInterval != nil {
+			duplexCfg.PingInterval = *fileCfg.PingInterval
+		}
+		if fileCfg.VeryVerbose != nil {
+			duplexCfg.VeryVerbose = *fileCfg.VeryVerbose
 		}
 	}
 
