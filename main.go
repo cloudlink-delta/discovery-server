@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	discovery "github.com/cloudlink-delta/discovery-server/server"
+	"github.com/cloudlink-delta/discovery-server/server"
 	"github.com/cloudlink-delta/duplex"
 	"github.com/pion/webrtc/v3"
 )
@@ -148,7 +148,7 @@ func main() {
 	}
 
 	// Initialize the discovery server
-	instance := discovery.New(designation, listenerAddress, &duplexCfg)
+	instance := server.New(designation, listenerAddress, &duplexCfg)
 
 	// Graceful shutdown handler
 	c := make(chan os.Signal, 1)
