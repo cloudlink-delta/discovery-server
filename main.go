@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -11,134 +10,95 @@ import (
 	"github.com/cloudlink-delta/discovery-server/server"
 	"github.com/cloudlink-delta/duplex"
 	"github.com/pion/webrtc/v3"
+	"github.com/rs/zerolog"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 func main() {
 
 	// CLI flags
-	configFile := flag.String("config", "", "Path to JSON configuration file")
-	designationFlag := flag.String("designation", "", "Globally unique designation (required)")
+	pflag.Int("log-level", (int)(zerolog.InfoLevel), "Logging level to use. Acceptable values range from -1 to 7. (default: 1 \"Info\")")
+	pflag.String("config", "", "Path to JSON configuration file")
+	pflag.String("designation", "", "Globally unique designation (required)")
 
 	// Duplex lib flags
-	enablePinger := flag.Bool("enable-pinger", false, "Enable ping/pong keepalive")
-	pingInterval := flag.Int64("ping-interval", 5000, "Ping/pong interval (in milliseconds)")
-	veryVerbose := flag.Bool("very-verbose", false, "Enable very verbose logging (this will absolutely thrash your terminal)")
-	enableSecure := flag.Bool("session-secure", true, "Enable secure session server connections (required if session-hostname is set)")
-	sessionServerPort := flag.Int("session-port", 443, "Port where the session server is listening (required if session-hostname is set)")
-	sessionServerHostname := flag.String("session-hostname", "", "Hostname where the session server is listening")
-	iceServersFlag := flag.String("ice-servers", "", "JSON-encoded array of ICE servers")
-	address := flag.String("address", "127.0.0.1:3001", "Discovery server listener address")
+	pflag.Bool("enable-pinger", false, "Enable ping/pong keepalive")
+	pflag.Int64("ping-interval", 5000, "Ping/pong interval (in milliseconds)")
+	pflag.Bool("session-secure", true, "Enable secure session server connections (required if session-hostname is set)")
+	pflag.Int("session-port", 443, "Port where the session server is listening (required if session-hostname is set)")
+	pflag.String("session-hostname", "", "Hostname where the session server is listening")
+	pflag.String("ice-servers", "", "JSON-encoded array of ICE servers")
+	pflag.String("address", "127.0.0.1:3001", "Discovery server listener address")
 
 	// Parse command-line flags
-	flag.Usage = func() {
+	pflag.Usage = func() {
 		log.Println("Usage: discovery-server [options]")
 		log.Println("Options:")
-		flag.PrintDefaults()
+		pflag.PrintDefaults()
 	}
-	flag.Parse()
+	pflag.Parse()
 
-	// Defaults
-	designation := ""
-	duplexCfg := duplex.Config{
-		PingInterval: 5000,
-		Secure:       true,
-		Port:         443,
-	}
-	listenerAddress := "127.0.0.1:3001"
-
-	// Parser checks
-	sessionHostnameProvided := false
-	sessionSecureProvided := false
-	sessionPortProvided := false
+	// Bind flags to viper
+	viper.BindPFlag("log_level", pflag.Lookup("log-level"))
+	viper.BindPFlag("config", pflag.Lookup("config"))
+	viper.BindPFlag("designation", pflag.Lookup("designation"))
+	viper.BindPFlag("enable_pinger", pflag.Lookup("enable-pinger"))
+	viper.BindPFlag("ping_interval", pflag.Lookup("ping-interval"))
+	viper.BindPFlag("session_secure", pflag.Lookup("session-secure"))
+	viper.BindPFlag("session_port", pflag.Lookup("session-port"))
+	viper.BindPFlag("session_hostname", pflag.Lookup("session-hostname"))
+	viper.BindPFlag("ice_servers_flag", pflag.Lookup("ice-servers"))
+	viper.BindPFlag("address", pflag.Lookup("address"))
 
 	// Load config from file if provided
-	if *configFile != "" {
-		data, err := os.ReadFile(*configFile)
-		if err != nil {
+	if cfgFile := viper.GetString("config"); cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+		if err := viper.ReadInConfig(); err != nil {
 			log.Fatalf("Failed to read config file: %v", err)
-		}
-
-		var fileCfg struct {
-			Designation     *string            `json:"designation"`
-			EnablePinger    *bool              `json:"enable_pinger"`
-			PingInterval    *int64             `json:"ping_interval"`
-			VeryVerbose     *bool              `json:"very_verbose"`
-			ICEServers      []webrtc.ICEServer `json:"ice_servers"`
-			SessionHostname *string            `json:"session_hostname"`
-			SessionSecure   *bool              `json:"session_secure"`
-			SessionPort     *int               `json:"session_port"`
-			Address         *string            `json:"address"`
-		}
-
-		if err := json.Unmarshal(data, &fileCfg); err != nil {
-			log.Fatalf("Failed to parse config file: %v", err)
-		}
-
-		if fileCfg.Designation != nil {
-			designation = *fileCfg.Designation
-		}
-		if fileCfg.ICEServers != nil {
-			duplexCfg.ICEServers = fileCfg.ICEServers
-		}
-		if fileCfg.SessionHostname != nil {
-			duplexCfg.Hostname = *fileCfg.SessionHostname
-			sessionHostnameProvided = true
-		}
-		if fileCfg.SessionSecure != nil {
-			duplexCfg.Secure = *fileCfg.SessionSecure
-			sessionSecureProvided = true
-		}
-		if fileCfg.SessionPort != nil {
-			duplexCfg.Port = *fileCfg.SessionPort
-			sessionPortProvided = true
-		}
-		if fileCfg.Address != nil {
-			listenerAddress = *fileCfg.Address
-		}
-		if fileCfg.EnablePinger != nil {
-			duplexCfg.EnablePinger = *fileCfg.EnablePinger
-		}
-		if fileCfg.PingInterval != nil {
-			duplexCfg.PingInterval = *fileCfg.PingInterval
-		}
-		if fileCfg.VeryVerbose != nil {
-			duplexCfg.VeryVerbose = *fileCfg.VeryVerbose
 		}
 	}
 
-	// Override with explicitly set command-line flags
-	flag.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "designation":
-			designation = *designationFlag
-		case "enable-pinger":
-			duplexCfg.EnablePinger = *enablePinger
-		case "ping-interval":
-			duplexCfg.PingInterval = *pingInterval
-		case "very-verbose":
-			duplexCfg.VeryVerbose = *veryVerbose
-		case "session-secure":
-			duplexCfg.Secure = *enableSecure
-			sessionSecureProvided = true
-		case "session-port":
-			duplexCfg.Port = *sessionServerPort
-			sessionPortProvided = true
-		case "session-hostname":
-			duplexCfg.Hostname = *sessionServerHostname
-			sessionHostnameProvided = true
-		case "address":
-			listenerAddress = *address
-		case "ice-servers":
-			var iceServers []webrtc.ICEServer
-			if err := json.Unmarshal([]byte(*iceServersFlag), &iceServers); err != nil {
-				log.Fatalf("Failed to parse ice-servers flag: %v", err)
-			}
-			duplexCfg.ICEServers = iceServers
+	logging_level := zerolog.Level(viper.GetInt("log_level"))
+	serverCfg := server.Config{
+		Designation: viper.GetString("designation"),
+		Address:     viper.GetString("address"),
+		Log_Level:   logging_level,
+	}
+
+	duplexCfg := duplex.Config{
+		LogLevel:     logging_level,
+		PingInterval: viper.GetInt64("ping_interval"),
+		EnablePinger: viper.GetBool("enable_pinger"),
+		Secure:       viper.GetBool("session_secure"),
+		Port:         viper.GetInt("session_port"),
+	}
+
+	sessionHostnameProvided := pflag.CommandLine.Changed("session-hostname") || viper.IsSet("session_hostname")
+	sessionSecureProvided := pflag.CommandLine.Changed("session-secure") || viper.IsSet("session_secure")
+	sessionPortProvided := pflag.CommandLine.Changed("session-port") || viper.IsSet("session_port")
+
+	if sessionHostnameProvided {
+		duplexCfg.Hostname = viper.GetString("session_hostname")
+	}
+
+	var iceServers []webrtc.ICEServer
+	if viper.IsSet("ice_servers") {
+		data, _ := json.Marshal(viper.Get("ice_servers"))
+		if err := json.Unmarshal(data, &iceServers); err != nil {
+			log.Fatalf("Failed to parse ice_servers from config: %v", err)
 		}
-	})
+		duplexCfg.ICEServers = iceServers
+	}
+	if iceFlag := viper.GetString("ice_servers_flag"); iceFlag != "" {
+		if err := json.Unmarshal([]byte(iceFlag), &iceServers); err != nil {
+			log.Fatalf("Failed to parse ice-servers flag: %v", err)
+		}
+		duplexCfg.ICEServers = iceServers
+	}
 
 	// Verify loaded configuration
-	if designation == "" {
+	if serverCfg.Designation == "" {
 		log.Fatal("A designation is required. Please provide it via -designation or in a config.json file. See --help for more information.")
 	}
 	if sessionHostnameProvided {
@@ -148,7 +108,7 @@ func main() {
 	}
 
 	// Initialize the discovery server
-	instance := server.New(designation, listenerAddress, &duplexCfg)
+	instance := server.New(&serverCfg, &duplexCfg)
 
 	// Graceful shutdown handler
 	c := make(chan os.Signal, 1)

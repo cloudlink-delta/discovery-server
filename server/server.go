@@ -2,16 +2,18 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"maps"
+	"os"
 	"regexp"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/gofiber/contrib/v3/monitor"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 
 	"github.com/cloudlink-delta/duplex"
 )
@@ -126,8 +128,19 @@ func (l *Lobby) ComputeCount() {
 
 type Registry map[string]*duplex.Peer
 
+type Config struct {
+	Designation string
+
+	// Defines the listening address of the metrics/health gateway.
+	Address string
+
+	// Defines the logging level that the server will use.
+	Log_Level zerolog.Level
+}
+
 // Define Discovery server
 type Instance struct {
+	Self                  string
 	Designation           string
 	Lobbies               Lobbies
 	Hosts                 Hosts
@@ -139,15 +152,40 @@ type Instance struct {
 	App                   *fiber.App
 	Address               string
 	Predisposed_Instances []string
+	Logger                *zerolog.Logger
 	*duplex.Instance
 }
 
-func New(designation string, address string, config *duplex.Config) *Instance {
+func (i *Instance) default_logger(level zerolog.Level) *zerolog.Logger {
+	// Configure zerolog
+	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	logger := zerolog.New(output).With().Timestamp().Logger().Level(level)
+	logger = logger.With().Str("instance", i.Self).Logger()
+	return &logger
+}
+
+func New(server_config *Config, duplex_config *duplex.Config) *Instance {
+
+	if server_config == nil {
+		panic("server_config required")
+	}
+
+	if server_config.Designation == "" {
+		panic("designation required")
+	}
+
+	if server_config.Address == "" {
+		panic("address required")
+	}
 
 	// Initialize duplex instance
+	name := "discovery@" + server_config.Designation
+	i := duplex.New(name, duplex_config)
+
 	server := &Instance{
-		Designation:       designation,
-		Instance:          duplex.New("discovery@"+designation, config),
+		Self:              name,
+		Designation:       server_config.Designation,
+		Instance:          i,
 		Lobbies:           make(Lobbies),
 		Hosts:             make(Hosts),
 		Members:           make(Peers),
@@ -155,13 +193,14 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		NameRegistry:      make(Registry),
 		BridgeRegistry:    make(Registry),
 		DiscoveryRegistry: make(Registry),
-		Address:           address,
+		Address:           server_config.Address,
 		App: fiber.New(fiber.Config{
 			JSONEncoder:   json.Marshal,
 			JSONDecoder:   json.Unmarshal,
 			StrictRouting: true,
 		}),
 	}
+	server.Logger = server.default_logger(server_config.Log_Level)
 	server.IsDiscovery = true
 
 	// Configure Health endpoint
@@ -307,7 +346,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 					Payload: "host",
 				})
 
-				log.Printf("made %s the new host of lobby %v", new_host.GetPeerID(), lobby.ID)
+				server.Logger.Info().Msgf("made %s the new host of lobby %v", new_host.GetPeerID(), lobby.ID)
 
 			} else {
 
@@ -330,19 +369,16 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 					})
 				}
 
-				log.Printf("destroyed lobby %v since it was empty", lobby.ID)
+				server.Logger.Info().Msgf("destroyed lobby %v since it was empty", lobby.ID)
 			}
 
 		} else {
-			// Perform member actions
 
 			// Remove from members
 			lobby.Remove(peer)
 
-			log.Printf("removed %s from lobby %v", peer.GetPeerID(), lobby.ID)
+			server.Logger.Info().Msgf("removed %s from lobby %v", peer.GetPeerID(), lobby.ID)
 		}
-
-		// TODO: halt and destroy the PING/PONG thread
 	}
 
 	// Bind opcode handlers
@@ -504,7 +540,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		peer.KeyStore["lobby"] = args.LobbyID
 
 		// Log
-		log.Printf("%s created %v", peer.GiveName(), args.LobbyID)
+		server.Logger.Info().Msgf("%s created %v", peer.GiveName(), args.LobbyID)
 
 		// Tell the peer to TRANSITION to "host"
 		peer.Write(&duplex.TxPacket{
@@ -670,7 +706,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		peer.KeyStore["lobby"] = args.LobbyID
 
 		// Log
-		log.Printf("%s joined %v", peer.GiveName(), lobby)
+		server.Logger.Info().Msgf("%s joined %v", peer.GiveName(), lobby)
 
 		// Tell the peer to TRANSITION to "peer"
 		peer.Write(&duplex.TxPacket{
@@ -751,7 +787,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 		// Lock lobby
 		lobby.Locked = true
-		log.Printf("%s locked %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s locked %s", peer.GiveName(), lobby.ID)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -781,7 +817,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 		// Unlock lobby
 		lobby.Locked = false
-		log.Printf("%s unlocked %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s unlocked %s", peer.GiveName(), lobby.ID)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -850,7 +886,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 		// Set new value
 		lobby.MaxPeers = new_count
-		log.Printf("%s set lobby %s max peers to %d", peer.GiveName(), lobby.ID, lobby.MaxPeers)
+		server.Logger.Info().Msgf("%s set lobby %s max peers to %d", peer.GiveName(), lobby.ID, lobby.MaxPeers)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -907,7 +943,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 		// Set new value
 		lobby.Password = new_password
-		log.Printf("%s updated lobby %s password", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s updated lobby %s password", peer.GiveName(), lobby.ID)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -1014,7 +1050,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 			},
 		})
 
-		log.Printf("%s was kicked from lobby %s by %s", target.GiveName(), lobby.ID, peer.GiveName())
+		server.Logger.Info().Msgf("%s was kicked from lobby %s by %s", target.GiveName(), lobby.ID, peer.GiveName())
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -1045,7 +1081,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 		// Hide lobby
 		lobby.Hidden = true
-		log.Printf("%s hid %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s hid %s", peer.GiveName(), lobby.ID)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -1075,7 +1111,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		// Show lobby
 		lobby.Hidden = false
 
-		log.Printf("%s showed %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s showed %s", peer.GiveName(), lobby.ID)
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -1190,7 +1226,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 			})
 		}
 
-		log.Printf("%s transferred %s to %s", peer.GiveName(), lobby.ID, target.GetPeerID())
+		server.Logger.Info().Msgf("%s transferred %s to %s", peer.GiveName(), lobby.ID, target.GetPeerID())
 
 		// Return success
 		peer.Write(&duplex.TxPacket{
@@ -1343,7 +1379,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 			Payload: peer.GetPeerID(),
 		})
 
-		log.Printf("%s left %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s left %s", peer.GiveName(), lobby.ID)
 
 		// Transition to ""
 		peer.Write(&duplex.TxPacket{
@@ -1410,7 +1446,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 		delete(server.Lobbies, AnyToString(lobby.ID))
 		delete(server.Members, lobby)
 		delete(server.Hosts, lobby)
-		log.Printf("%s closed %s", peer.GiveName(), lobby.ID)
+		server.Logger.Info().Msgf("%s closed %s", peer.GiveName(), lobby.ID)
 
 		// Tell the host to TRANSITION to ""
 		peer.Write(&duplex.TxPacket{
@@ -1500,7 +1536,7 @@ func New(designation string, address string, config *duplex.Config) *Instance {
 
 func (server *Instance) AutoRegister(peer *duplex.Peer, registry Registry) {
 	username := peer.GetPeerID()
-	log.Printf("Automatically registering %s", username)
+	server.Logger.Info().Msgf("Automatically registering %s", username)
 
 	// Obtain lock
 	server.Mutex.Lock()
@@ -1553,7 +1589,7 @@ func (i *Instance) Multiquery(username string, peer *duplex.Peer, packet *duplex
 		})
 
 		if reply.Opcode != "QUERY_ACK" {
-			log.Printf("Multiquery error: %s replied with %v", upstream.GetPeerID(), reply)
+			i.Logger.Info().Msgf("Multiquery error: %s replied with %v", upstream.GetPeerID(), reply)
 			return nil
 		}
 
@@ -1725,7 +1761,7 @@ func (i *Instance) ResolvePeer(username string, peer *duplex.Peer, packet *duple
 func (i *Instance) Run() {
 	go func() {
 		if err := i.App.Listen(i.Address); err != nil {
-			log.Printf("Fiber app error: %v", err)
+			i.Logger.Fatal().Msgf("Fiber app error: %v", err)
 		}
 	}()
 	i.Instance.Run()
