@@ -51,6 +51,9 @@ func main() {
 	viper.BindPFlag("ice_servers_flag", pflag.Lookup("ice-servers"))
 	viper.BindPFlag("address", pflag.Lookup("address"))
 
+	// Load values from environment variables
+	viper.AutomaticEnv()
+
 	// Load config from file if provided
 	if cfgFile := viper.GetString("config"); cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
