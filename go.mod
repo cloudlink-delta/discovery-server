@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/cloudlink-delta/duplex v0.0.0-20260428151014-084c2767fc50
 	github.com/goccy/go-json v0.10.6
-	github.com/gofiber/contrib/v3/monitor v1.0.3
+	github.com/gofiber/contrib/v3/monitor v1.0.4
 	github.com/gofiber/fiber/v3 v3.2.0
 	github.com/google/uuid v1.6.0
 	github.com/pion/webrtc/v3 v3.3.6

@@ -25,8 +25,8 @@ github.com/go-viper/mapstructure/v2 v2.5.0 h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPE
 github.com/go-viper/mapstructure/v2 v2.5.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
 github.com/goccy/go-json v0.10.6 h1:p8HrPJzOakx/mn/bQtjgNjdTcN+/S6FcG2CTtQOrHVU=
 github.com/goccy/go-json v0.10.6/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
-github.com/gofiber/contrib/v3/monitor v1.0.3 h1:SAbKxt1ZapVKHVJsiyd+83Rssw5HAwe0/vcTBsXnGuM=
-github.com/gofiber/contrib/v3/monitor v1.0.3/go.mod h1:Q9pWp/DWMH1U7czenYPczIm0eiDgPA0qBGpMQACq2/w=
+github.com/gofiber/contrib/v3/monitor v1.0.4 h1:u/Fg4d9RWpVc/+nZl/+r9Ag3C+TLssztL8YUoNFpRYw=
+github.com/gofiber/contrib/v3/monitor v1.0.4/go.mod h1:kJhtZRoaObN13hpUlSuT9zMOijN5fM4aShhwa8vGHOE=
 github.com/gofiber/fiber/v3 v3.2.0 h1:g9+09D320foINPpCnR3ibQ5oBEFHjAWRRfDG1te54u8=
 github.com/gofiber/fiber/v3 v3.2.0/go.mod h1:FHOsc2Db7HhHpsE62QAaJlXVV1pNkbZEptZ4jtti7m4=
 github.com/gofiber/schema v1.7.1 h1:oSJBKdgP8JeIME4TQSAqlNKTU2iBB+2RNmKi8Nsc+TI=
