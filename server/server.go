@@ -222,7 +222,17 @@ func New(server_config *Config, duplex_config *duplex.Config) *Instance {
 	server.OnCreate = func() {
 
 		// Establish a connection to every predisposed instance.
+		if len(server.Predisposed_Instances) == 0 {
+			server.Logger.Info().Msg("No predisposed instances configured")
+			return
+		}
+
 		for _, instance := range server.Predisposed_Instances {
+			if instance == "" {
+				server.Logger.Warn().Msg("Skipping empty predisposed instance URL")
+				continue
+			}
+			server.Logger.Info().Msgf("Connecting to predisposed instance: %s", instance)
 			server.Instance.Connect(instance)
 		}
 	}

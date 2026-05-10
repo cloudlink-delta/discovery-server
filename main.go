@@ -19,7 +19,7 @@ func main() {
 
 	// CLI flags
 	pflag.Int("log-level", (int)(zerolog.InfoLevel), "Logging level to use. Acceptable values range from -1 to 7. (default: 1 \"Info\")")
-	pflag.String("config", "", "Path to JSON configuration file")
+	pflag.String("config", "./config.json", "Path to JSON configuration file")
 	pflag.String("designation", "", "Globally unique designation (required)")
 
 	// Duplex lib flags
@@ -27,8 +27,9 @@ func main() {
 	pflag.Int64("ping-interval", 5000, "Ping/pong interval (in milliseconds)")
 	pflag.Bool("session-secure", true, "Enable secure session server connections (required if session-hostname is set)")
 	pflag.Int("session-port", 443, "Port where the session server is listening (required if session-hostname is set)")
-	pflag.String("session-hostname", "", "Hostname where the session server is listening")
+	pflag.String("session-hostname", "peerjs.mikedev101.cc", "Hostname where the session server is listening")
 	pflag.String("ice-servers", "", "JSON-encoded array of ICE servers")
+	pflag.String("predisposed-instances", "[]", "JSON-encoded array of WebSocket URLs for instances to connect to on startup")
 	pflag.String("address", "127.0.0.1:3001", "Discovery server listener address")
 
 	// Parse command-line flags
@@ -49,6 +50,7 @@ func main() {
 	viper.BindPFlag("session_port", pflag.Lookup("session-port"))
 	viper.BindPFlag("session_hostname", pflag.Lookup("session-hostname"))
 	viper.BindPFlag("ice_servers_flag", pflag.Lookup("ice-servers"))
+	viper.BindPFlag("predisposed_instances_flag", pflag.Lookup("predisposed-instances"))
 	viper.BindPFlag("address", pflag.Lookup("address"))
 
 	// Load values from environment variables
@@ -112,6 +114,23 @@ func main() {
 
 	// Initialize the discovery server
 	instance := server.New(&serverCfg, &duplexCfg)
+
+	// Load predisposed instances if provided
+	var predisposedInstances []string
+	if predisposedFlag := viper.GetString("predisposed_instances_flag"); predisposedFlag != "" {
+		if err := json.Unmarshal([]byte(predisposedFlag), &predisposedInstances); err != nil {
+			log.Printf("Warning: Failed to parse predisposed-instances flag: %v", err)
+		}
+	}
+	if viper.IsSet("predisposed_instances") && len(predisposedInstances) == 0 {
+		data, _ := json.Marshal(viper.Get("predisposed_instances"))
+		if err := json.Unmarshal(data, &predisposedInstances); err != nil {
+			log.Printf("Warning: Failed to parse predisposed_instances from config: %v", err)
+		}
+	}
+	if len(predisposedInstances) > 0 {
+		instance.Predisposed_Instances = predisposedInstances
+	}
 
 	// Graceful shutdown handler
 	c := make(chan os.Signal, 1)
