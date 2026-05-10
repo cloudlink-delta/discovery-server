@@ -23,11 +23,11 @@ func main() {
 	pflag.String("designation", "", "Globally unique designation (required)")
 
 	// Duplex lib flags
-	pflag.Bool("enable-pinger", true, "Enable ping/pong keepalive")
+	pflag.Bool("enable-pinger", false, "Enable ping/pong keepalive")
 	pflag.Int64("ping-interval", 5000, "Ping/pong interval (in milliseconds)")
 	pflag.Bool("session-secure", true, "Enable secure session server connections (required if session-hostname is set)")
 	pflag.Int("session-port", 443, "Port where the session server is listening (required if session-hostname is set)")
-	pflag.String("session-hostname", "", "Hostname where the session server is listening")
+	pflag.String("session-hostname", "peerjs.mikedev101.cc", "Hostname where the session server is listening")
 	pflag.String("ice-servers", "", "JSON-encoded array of ICE servers")
 	pflag.String("predisposed-instances", "[]", "JSON-encoded array of WebSocket URLs for instances to connect to on startup")
 	pflag.String("address", "127.0.0.1:3001", "Discovery server listener address")
