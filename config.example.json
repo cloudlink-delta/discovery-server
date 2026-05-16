@@ -10,9 +10,10 @@
   "predisposed_instances": [],
   "ice_servers": [
     {
+      "urls": ["stun:vpn.mikedev101.cc:3478"]
+    },
+    {
       "urls": [
-        "stun:vpn.mikedev101.cc:3478",
-        "stun:vpn.mikedev101.cc:5349",
         "turn:vpn.mikedev101.cc:3478"
       ],
       "username": "free",
