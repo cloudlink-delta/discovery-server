@@ -20,6 +20,7 @@ RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /root/
 COPY --from=builder /app/discovery-server .
+COPY config.json .
 
 EXPOSE 3001
 ENTRYPOINT ["./discovery-server"]
